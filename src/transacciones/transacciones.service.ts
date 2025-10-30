@@ -415,6 +415,90 @@ export class TransaccionesService {
   }
 
   /**
+   * Crea una transferencia entre dos cuentas
+   */
+  async createTransfer(
+    usuarioId: number,
+    cuentaOrigenId: number,
+    cuentaDestinoId: number,
+    monto: number,
+    moneda?: string,
+    titulo?: string,
+    descripcion?: string,
+    fechaTransaccion?: string,
+    notas?: string
+  ): Promise<TransaccionResponseDto[]> {
+    try {
+      // Validaciones
+      if (monto <= 0) {
+        throw new BadRequestException('El monto debe ser mayor que cero');
+      }
+
+      if (cuentaOrigenId === cuentaDestinoId) {
+        throw new BadRequestException('La cuenta de origen y destino no pueden ser la misma');
+      }
+
+      let fechaValida: Date;
+      if (fechaTransaccion) {
+        const str = fechaTransaccion as unknown as string;
+        // Parse local YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss
+        const m = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+        if (m) {
+          const y = Number(m[1]);
+          const mo = Number(m[2]) - 1;
+          const d = Number(m[3]);
+          const hh = m[4] ? Number(m[4]) : 0;
+          const mm = m[5] ? Number(m[5]) : 0;
+          const ss = m[6] ? Number(m[6]) : 0;
+          fechaValida = new Date(y, mo, d, hh, mm, ss); // Local time
+        } else {
+          fechaValida = new Date(str);
+        }
+        if (isNaN(fechaValida.getTime())) {
+          throw new BadRequestException('La fecha de transacción no es válida');
+        }
+      } else {
+        fechaValida = new Date();
+      }
+
+      // Crear la transferencia usando el stored procedure
+      const result = await this.connection.manager.query(
+        `EXEC sp_transaccion_create_transfer
+          @UsuarioId = @0,
+          @CuentaOrigenId = @1,
+          @CuentaDestinoId = @2,
+          @Monto = @3,
+          @Moneda = @4,
+          @Titulo = @5,
+          @Descripcion = @6,
+          @FechaTransaccion = @7,
+          @Notas = @8`,
+        [
+          usuarioId,
+          cuentaOrigenId,
+          cuentaDestinoId,
+          monto,
+          moneda || 'COP',
+          titulo || null,
+          descripcion || null,
+          fechaValida,
+          notas || null,
+        ]
+      );
+
+      return result.map(item => this.mapToResponseDto(item));
+    } catch (error) {
+      this.logger.error(`Error al crear transferencia: ${error.message}`);
+      
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      
+      throw new Error(`Error al crear transferencia: ${error.message}`);
+    }
+  }
+
+  /**
    * Mapea los datos de la transacción a DTO de respuesta
    */
   private mapToResponseDto(transaccion: any): TransaccionResponseDto {

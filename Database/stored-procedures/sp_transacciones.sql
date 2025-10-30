@@ -285,6 +285,161 @@ BEGIN
 END;
 GO
 
+-- SP: Crear transferencia entre cuentas
+CREATE OR ALTER PROCEDURE sp_transaccion_create_transfer
+    @UsuarioId BIGINT,
+    @CuentaOrigenId BIGINT,
+    @CuentaDestinoId BIGINT,
+    @Monto DECIMAL(18,2),
+    @Moneda NVARCHAR(10) = 'COP',
+    @Titulo NVARCHAR(150) = NULL,
+    @Descripcion NVARCHAR(500) = NULL,
+    @FechaTransaccion DATETIME2(7) = NULL,
+    @Notas NVARCHAR(1000) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        
+        -- Validar que el usuario existe
+        IF NOT EXISTS (SELECT 1 FROM usuarios WHERE id = @UsuarioId AND activo = 1)
+        BEGIN
+            RAISERROR('Usuario no encontrado o inactivo', 16, 1);
+            ROLLBACK TRANSACTION;
+            RETURN;
+        END
+        
+        -- Validar que las cuentas existen y pertenecen al usuario
+        IF NOT EXISTS (SELECT 1 FROM cuentas WHERE id = @CuentaOrigenId AND usuario_id = @UsuarioId AND activa = 1)
+        BEGIN
+            RAISERROR('Cuenta de origen no encontrada o inactiva', 16, 1);
+            ROLLBACK TRANSACTION;
+            RETURN;
+        END
+        
+        IF NOT EXISTS (SELECT 1 FROM cuentas WHERE id = @CuentaDestinoId AND usuario_id = @UsuarioId AND activa = 1)
+        BEGIN
+            RAISERROR('Cuenta de destino no encontrada o inactiva', 16, 1);
+            ROLLBACK TRANSACTION;
+            RETURN;
+        END
+        
+        -- Validar que no sean la misma cuenta
+        IF @CuentaOrigenId = @CuentaDestinoId
+        BEGIN
+            RAISERROR('La cuenta de origen y destino no pueden ser la misma', 16, 1);
+            ROLLBACK TRANSACTION;
+            RETURN;
+        END
+        
+        -- Validar monto
+        IF @Monto <= 0
+        BEGIN
+            RAISERROR('El monto debe ser mayor a cero', 16, 1);
+            ROLLBACK TRANSACTION;
+            RETURN;
+        END
+        
+        -- Obtener ID del tipo TRANSFERENCIA
+        DECLARE @TipoTransferenciaId BIGINT;
+        SELECT @TipoTransferenciaId = id FROM tipos_transaccion WHERE nombre = 'TRANSFERENCIA' AND activo = 1;
+        
+        IF @TipoTransferenciaId IS NULL
+        BEGIN
+            RAISERROR('Tipo de transacción TRANSFERENCIA no encontrado', 16, 1);
+            ROLLBACK TRANSACTION;
+            RETURN;
+        END
+        
+        -- Usar fecha actual si no se proporciona
+        IF @FechaTransaccion IS NULL
+            SET @FechaTransaccion = GETDATE()
+        
+        -- Crear título por defecto si no se proporciona
+        IF @Titulo IS NULL
+        BEGIN
+            DECLARE @NombreOrigen NVARCHAR(100);
+            DECLARE @NombreDestino NVARCHAR(100);
+            SELECT @NombreOrigen = nombre FROM cuentas WHERE id = @CuentaOrigenId;
+            SELECT @NombreDestino = nombre FROM cuentas WHERE id = @CuentaDestinoId;
+            SET @Titulo = 'Transferencia de ' + @NombreOrigen + ' a ' + @NombreDestino;
+        END
+        
+        -- Crear la transacción de salida (GASTO en cuenta origen)
+        DECLARE @TipoGastoId BIGINT;
+        SELECT @TipoGastoId = id FROM tipos_transaccion WHERE nombre = 'GASTO' AND activo = 1;
+        
+        INSERT INTO transacciones (
+            usuario_id, cuenta_id, tipo_transaccion_id, categoria_id, metodo_pago_id,
+            monto, moneda, titulo, descripcion, fecha_transaccion, archivo_adjunto, notas, repetir, activa, fecha_creacion
+        )
+        VALUES (
+            @UsuarioId, @CuentaOrigenId, @TipoGastoId, NULL, NULL,
+            @Monto, @Moneda, @Titulo, @Descripcion, @FechaTransaccion, NULL, @Notas, 0, 1, GETDATE()
+        )
+        
+        DECLARE @TransaccionOrigenId BIGINT = SCOPE_IDENTITY();
+        
+        -- Crear la transacción de entrada (INGRESO en cuenta destino)
+        DECLARE @TipoIngresoId BIGINT;
+        SELECT @TipoIngresoId = id FROM tipos_transaccion WHERE nombre = 'INGRESO' AND activo = 1;
+        
+        INSERT INTO transacciones (
+            usuario_id, cuenta_id, tipo_transaccion_id, categoria_id, metodo_pago_id,
+            monto, moneda, titulo, descripcion, fecha_transaccion, archivo_adjunto, notas, repetir, activa, fecha_creacion
+        )
+        VALUES (
+            @UsuarioId, @CuentaDestinoId, @TipoIngresoId, NULL, NULL,
+            @Monto, @Moneda, @Titulo, @Descripcion, @FechaTransaccion, NULL, @Notas, 0, 1, GETDATE()
+        )
+        
+        DECLARE @TransaccionDestinoId BIGINT = SCOPE_IDENTITY();
+        
+        -- Retornar ambas transacciones
+        SELECT 
+            t.id,
+            t.usuario_id,
+            t.cuenta_id,
+            ct.nombre AS cuenta_nombre,
+            t.tipo_transaccion_id,
+            tt.nombre AS tipo_nombre,
+            t.categoria_id,
+            c.nombre AS categoria_nombre,
+            c.color AS categoria_color,
+            c.icono AS categoria_icono,
+            t.metodo_pago_id,
+            mp.nombre AS metodo_pago_nombre,
+            t.monto,
+            t.moneda,
+            t.titulo,
+            t.descripcion,
+            t.fecha_transaccion,
+            t.archivo_adjunto,
+            t.notas,
+            t.repetir,
+            t.activa,
+            t.fecha_creacion
+        FROM transacciones t
+        LEFT JOIN tipos_transaccion tt ON t.tipo_transaccion_id = tt.id
+        LEFT JOIN categorias c ON t.categoria_id = c.id
+        LEFT JOIN metodos_pago mp ON t.metodo_pago_id = mp.id
+        LEFT JOIN cuentas ct ON t.cuenta_id = ct.id
+        WHERE t.id IN (@TransaccionOrigenId, @TransaccionDestinoId)
+        ORDER BY t.cuenta_id, t.tipo_transaccion_id;
+        
+        COMMIT TRANSACTION;
+        
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END;
+GO
+
 -- SP: Obtener transacción por ID
 CREATE OR ALTER PROCEDURE sp_transaccion_get_by_id
     @Id BIGINT,

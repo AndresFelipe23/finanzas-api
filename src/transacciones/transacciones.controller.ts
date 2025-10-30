@@ -39,6 +39,44 @@ export class TransaccionesController {
     return await this.transaccionesService.create(usuarioId, createTransaccionDto);
   }
 
+  @Post('transfer')
+  @ApiOperation({
+    summary: 'Crear transferencia',
+    description: 'Crea una transferencia entre dos cuentas del usuario'
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Transferencia creada exitosamente',
+    type: [TransaccionResponseDto]
+  })
+  @ApiBearerAuth()
+  async createTransfer(
+    @Body() body: {
+      cuentaOrigenId: number;
+      cuentaDestinoId: number;
+      monto: number;
+      moneda?: string;
+      titulo?: string;
+      descripcion?: string;
+      fechaTransaccion?: string;
+      notas?: string;
+    }
+  ): Promise<TransaccionResponseDto[]> {
+    // TODO: Extraer usuarioId del JWT
+    const usuarioId = 1;
+    return await this.transaccionesService.createTransfer(
+      usuarioId,
+      body.cuentaOrigenId,
+      body.cuentaDestinoId,
+      body.monto,
+      body.moneda,
+      body.titulo,
+      body.descripcion,
+      body.fechaTransaccion,
+      body.notas
+    );
+  }
+
   @Get()
   @ApiOperation({ 
     summary: 'Obtener transacciones', 
