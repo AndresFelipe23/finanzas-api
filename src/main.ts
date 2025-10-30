@@ -67,7 +67,12 @@ async function bootstrap() {
   app.getHttpAdapter().getInstance().get('/scalar', (req, res) => {
     res.send(scalarHtml);
   });
-  
+
+  // Redirección de la raíz a Scalar
+  app.getHttpAdapter().getInstance().get('/', (req, res) => {
+    res.redirect('/scalar');
+  });
+
   // Swagger UI (backup)
   SwaggerModule.setup('api/docs', app, document);
   
