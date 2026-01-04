@@ -14,7 +14,8 @@ export class PagosNfcService {
   }
 
   async create(usuarioId: number, dto: CreatePagoNfcDto) {
-    const fecha = dto.fechaTransaccion ? new Date(dto.fechaTransaccion) : null;
+    // Siempre usar null para que el stored procedure use GETDATE()
+    // Esto asegura que se guarde la fecha/hora exacta del momento de creación
     const res = await this.connection.manager.query(
       `EXEC sp_pago_nfc_create @UsuarioId=@0,@TarjetaId=@1,@DispositivoNfcId=@2,@Monto=@3,@FechaTransaccion=@4,@CuentaId=@5,@CategoriaId=@6,@Descripcion=@7,@Ubicacion=@8,@Lat=@9,@Lon=@10`,
       [
@@ -22,7 +23,7 @@ export class PagosNfcService {
         dto.tarjetaId,
         dto.dispositivoNfcId,
         dto.monto,
-        fecha,
+        null, // Siempre null para usar fecha/hora actual del servidor
         dto.cuentaId ?? null,
         dto.categoriaId ?? null,
         dto.descripcion ?? null,

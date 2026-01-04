@@ -8,6 +8,7 @@ import {
   Delete,
   ParseIntPipe,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { MetasService } from './metas.service';
@@ -15,9 +16,13 @@ import { CreateMetaDto } from './dto/create-meta.dto';
 import { UpdateMetaDto } from './dto/update-meta.dto';
 import { MetaResponseDto } from './dto/meta-response.dto';
 import { CreateAporteDto } from './dto/create-aporte.dto';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { CurrentUserId } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Metas')
 @Controller('metas')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth()
 export class MetasController {
   constructor(private readonly metasService: MetasService) {}
 
@@ -31,10 +36,10 @@ export class MetasController {
     description: 'Meta creada exitosamente',
     type: MetaResponseDto,
   })
-  @ApiBearerAuth()
-  async create(@Body() createMetaDto: CreateMetaDto): Promise<MetaResponseDto> {
-    // TODO: Extraer usuarioId del JWT cuando implementemos el guard
-    const usuarioId = 1;
+  async create(
+    @Body() createMetaDto: CreateMetaDto,
+    @CurrentUserId() usuarioId: number,
+  ): Promise<MetaResponseDto> {
     return await this.metasService.create(usuarioId, createMetaDto);
   }
 
@@ -48,12 +53,10 @@ export class MetasController {
     description: 'Lista de metas',
     type: [MetaResponseDto],
   })
-  @ApiBearerAuth()
   async findAll(
+    @CurrentUserId() usuarioId: number,
     @Query('filtro') filtro?: 'ACTIVAS' | 'COMPLETADAS' | 'TODAS',
   ): Promise<MetaResponseDto[]> {
-    // TODO: Extraer usuarioId del JWT
-    const usuarioId = 1;
     const filtroFinal = filtro || 'TODAS';
     return await this.metasService.findAll(usuarioId, filtroFinal);
   }
@@ -72,10 +75,10 @@ export class MetasController {
     status: 404,
     description: 'Meta no encontrada',
   })
-  @ApiBearerAuth()
-  async findOne(@Param('id', ParseIntPipe) id: number): Promise<MetaResponseDto> {
-    // TODO: Extraer usuarioId del JWT
-    const usuarioId = 1;
+  async findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUserId() usuarioId: number,
+  ): Promise<MetaResponseDto> {
     return await this.metasService.findOne(id, usuarioId);
   }
 
@@ -93,13 +96,11 @@ export class MetasController {
     status: 404,
     description: 'Meta no encontrada',
   })
-  @ApiBearerAuth()
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateMetaDto: UpdateMetaDto,
+    @CurrentUserId() usuarioId: number,
   ): Promise<MetaResponseDto> {
-    // TODO: Extraer usuarioId del JWT
-    const usuarioId = 1;
     return await this.metasService.update(id, usuarioId, updateMetaDto);
   }
 
@@ -116,10 +117,10 @@ export class MetasController {
     status: 404,
     description: 'Meta no encontrada',
   })
-  @ApiBearerAuth()
-  async remove(@Param('id', ParseIntPipe) id: number): Promise<{ message: string }> {
-    // TODO: Extraer usuarioId del JWT
-    const usuarioId = 1;
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUserId() usuarioId: number,
+  ): Promise<{ message: string }> {
     return await this.metasService.remove(id, usuarioId);
   }
 
@@ -137,13 +138,11 @@ export class MetasController {
     status: 404,
     description: 'Meta no encontrada',
   })
-  @ApiBearerAuth()
   async toggleActiva(
     @Param('id', ParseIntPipe) id: number,
     @Query('activa') activa: string,
+    @CurrentUserId() usuarioId: number,
   ): Promise<MetaResponseDto> {
-    // TODO: Extraer usuarioId del JWT
-    const usuarioId = 1;
     const activaBool = activa === 'true' || activa === '1';
     return await this.metasService.toggleActiva(id, usuarioId, activaBool);
   }
@@ -162,13 +161,11 @@ export class MetasController {
     status: 404,
     description: 'Meta no encontrada',
   })
-  @ApiBearerAuth()
   async createAporte(
     @Param('id', ParseIntPipe) id: number,
     @Body() createAporteDto: CreateAporteDto,
+    @CurrentUserId() usuarioId: number,
   ): Promise<MetaResponseDto> {
-    // TODO: Extraer usuarioId del JWT
-    const usuarioId = 1;
     return await this.metasService.createAporte(id, usuarioId, createAporteDto);
   }
 
@@ -185,10 +182,10 @@ export class MetasController {
     status: 404,
     description: 'Meta no encontrada',
   })
-  @ApiBearerAuth()
-  async findAportes(@Param('id', ParseIntPipe) id: number): Promise<any[]> {
-    // TODO: Extraer usuarioId del JWT
-    const usuarioId = 1;
+  async findAportes(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUserId() usuarioId: number,
+  ): Promise<any[]> {
     return await this.metasService.findAportesByMeta(id, usuarioId);
   }
 }

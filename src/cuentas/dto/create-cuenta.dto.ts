@@ -1,5 +1,7 @@
 import { IsNotEmpty, IsString, IsOptional, IsEnum, IsNumber, Min, Max } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { IsMonedaValid } from '../../common/validators/is-moneda-valid.validator';
+import { MonedasConstants } from '../../common/constants/monedas.constants';
 
 export class CreateCuentaDto {
   @ApiProperty({ 
@@ -24,11 +26,13 @@ export class CreateCuentaDto {
 
   @ApiProperty({ 
     example: 'COP', 
-    description: 'Moneda de la cuenta',
-    default: 'COP'
+    description: 'Moneda de la cuenta (código ISO 4217). Monedas válidas: ' + MonedasConstants.getMonedasValidas().join(', '),
+    default: 'COP',
+    enum: MonedasConstants.getMonedasValidas(),
   })
   @IsOptional()
   @IsString({ message: 'La moneda debe ser un texto' })
+  @IsMonedaValid({ message: 'La moneda proporcionada no es válida. Debe ser un código ISO 4217 de un país de habla hispana.' })
   moneda?: string;
 
   @ApiProperty({ 

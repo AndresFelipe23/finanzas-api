@@ -49,8 +49,8 @@ export class TransaccionResponseDto {
   @ApiProperty({ example: 'Pago de servicios', description: 'Descripción', nullable: true })
   descripcion?: string;
 
-  @ApiProperty({ description: 'Fecha de la transacción' })
-  fecha_transaccion: Date;
+  @ApiProperty({ description: 'Fecha de la transacción en formato local (YYYY-MM-DDTHH:mm:ss)' })
+  fecha_transaccion: string;
 
   @ApiProperty({ example: 'https://example.com/recibo.jpg', description: 'Archivo adjunto', nullable: true })
   archivo_adjunto?: string;
@@ -64,7 +64,7 @@ export class TransaccionResponseDto {
   @ApiProperty({ example: true, description: 'Estado activo' })
   activa: boolean;
 
-  @ApiProperty({ description: 'Fecha de creación' })
-  fecha_creacion: Date;
+  @ApiProperty({ description: 'Fecha de creación en formato local (YYYY-MM-DDTHH:mm:ss)' })
+  fecha_creacion: string;
 }
 

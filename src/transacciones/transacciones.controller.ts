@@ -8,15 +8,20 @@ import {
   Delete, 
   ParseIntPipe,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { TransaccionesService } from './transacciones.service';
 import { CreateTransaccionDto } from './dto/create-transaccion.dto';
 import { UpdateTransaccionDto } from './dto/update-transaccion.dto';
 import { TransaccionResponseDto } from './dto/transaccion-response.dto';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { CurrentUserId } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Transacciones')
 @Controller('transacciones')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth()
 export class TransaccionesController {
   constructor(private readonly transaccionesService: TransaccionesService) {}
 
@@ -30,12 +35,10 @@ export class TransaccionesController {
     description: 'Transacción creada exitosamente',
     type: TransaccionResponseDto 
   })
-  @ApiBearerAuth()
   async create(
     @Body() createTransaccionDto: CreateTransaccionDto,
+    @CurrentUserId() usuarioId: number,
   ): Promise<TransaccionResponseDto> {
-    // TODO: Extraer usuarioId del JWT
-    const usuarioId = 1;
     return await this.transaccionesService.create(usuarioId, createTransaccionDto);
   }
 
@@ -49,7 +52,6 @@ export class TransaccionesController {
     description: 'Transferencia creada exitosamente',
     type: [TransaccionResponseDto]
   })
-  @ApiBearerAuth()
   async createTransfer(
     @Body() body: {
       cuentaOrigenId: number;
@@ -60,10 +62,9 @@ export class TransaccionesController {
       descripcion?: string;
       fechaTransaccion?: string;
       notas?: string;
-    }
+    },
+    @CurrentUserId() usuarioId: number,
   ): Promise<TransaccionResponseDto[]> {
-    // TODO: Extraer usuarioId del JWT
-    const usuarioId = 1;
     return await this.transaccionesService.createTransfer(
       usuarioId,
       body.cuentaOrigenId,
@@ -89,14 +90,11 @@ export class TransaccionesController {
     description: 'Lista de transacciones',
     type: [TransaccionResponseDto] 
   })
-  @ApiBearerAuth()
   async findAll(
+    @CurrentUserId() usuarioId: number,
     @Query('fechaInicio') fechaInicio?: string,
-    @Query('fechaFin') fechaFin?: string
+    @Query('fechaFin') fechaFin?: string,
   ): Promise<TransaccionResponseDto[]> {
-    // TODO: Extraer usuarioId del JWT
-    const usuarioId = 1;
-    
     return await this.transaccionesService.findAllByUser(
       usuarioId,
       fechaInicio ? new Date(fechaInicio) : undefined,
@@ -115,14 +113,11 @@ export class TransaccionesController {
     status: 200, 
     description: 'Resumen de transacciones' 
   })
-  @ApiBearerAuth()
   async getSummary(
+    @CurrentUserId() usuarioId: number,
     @Query('fechaInicio') fechaInicio?: string,
-    @Query('fechaFin') fechaFin?: string
+    @Query('fechaFin') fechaFin?: string,
   ): Promise<any[]> {
-    // TODO: Extraer usuarioId del JWT
-    const usuarioId = 1;
-    
     return await this.transaccionesService.getSummary(
       usuarioId,
       fechaInicio ? new Date(fechaInicio) : undefined,
@@ -142,15 +137,12 @@ export class TransaccionesController {
     description: 'Transacciones de la cuenta',
     type: [TransaccionResponseDto] 
   })
-  @ApiBearerAuth()
   async findByAccount(
+    @CurrentUserId() usuarioId: number,
     @Param('cuentaId', ParseIntPipe) cuentaId: number,
     @Query('fechaInicio') fechaInicio?: string,
-    @Query('fechaFin') fechaFin?: string
+    @Query('fechaFin') fechaFin?: string,
   ): Promise<TransaccionResponseDto[]> {
-    // TODO: Extraer usuarioId del JWT
-    const usuarioId = 1;
-    
     return await this.transaccionesService.findByAccount(
       usuarioId,
       cuentaId,
@@ -171,15 +163,12 @@ export class TransaccionesController {
     description: 'Transacciones de la categoría',
     type: [TransaccionResponseDto] 
   })
-  @ApiBearerAuth()
   async findByCategory(
+    @CurrentUserId() usuarioId: number,
     @Param('categoriaId', ParseIntPipe) categoriaId: number,
     @Query('fechaInicio') fechaInicio?: string,
-    @Query('fechaFin') fechaFin?: string
+    @Query('fechaFin') fechaFin?: string,
   ): Promise<TransaccionResponseDto[]> {
-    // TODO: Extraer usuarioId del JWT
-    const usuarioId = 1;
-    
     return await this.transaccionesService.findByCategory(
       usuarioId,
       categoriaId,
@@ -202,13 +191,10 @@ export class TransaccionesController {
     status: 404, 
     description: 'Transacción no encontrada' 
   })
-  @ApiBearerAuth()
   async findOne(
-    @Param('id', ParseIntPipe) id: number
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUserId() usuarioId: number,
   ): Promise<TransaccionResponseDto> {
-    // TODO: Extraer usuarioId del JWT
-    const usuarioId = 1;
-    
     return await this.transaccionesService.findOne(id, usuarioId);
   }
 
@@ -226,14 +212,11 @@ export class TransaccionesController {
     status: 404, 
     description: 'Transacción no encontrada' 
   })
-  @ApiBearerAuth()
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() updateTransaccionDto: UpdateTransaccionDto
+    @Body() updateTransaccionDto: UpdateTransaccionDto,
+    @CurrentUserId() usuarioId: number,
   ): Promise<TransaccionResponseDto> {
-    // TODO: Extraer usuarioId del JWT
-    const usuarioId = 1;
-    
     return await this.transaccionesService.update(id, usuarioId, updateTransaccionDto);
   }
 
@@ -250,13 +233,10 @@ export class TransaccionesController {
     status: 404, 
     description: 'Transacción no encontrada' 
   })
-  @ApiBearerAuth()
   async remove(
-    @Param('id', ParseIntPipe) id: number
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUserId() usuarioId: number,
   ): Promise<{ message: string }> {
-    // TODO: Extraer usuarioId del JWT
-    const usuarioId = 1;
-    
     return await this.transaccionesService.remove(id, usuarioId);
   }
 }

@@ -1,22 +1,13 @@
-import { IsEmail, IsNotEmpty, MinLength, IsOptional, Matches } from 'class-validator';
+import { IsNotEmpty, IsString, IsOptional, Matches } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { IsMonedaValid } from '../../common/validators/is-moneda-valid.validator';
 import { MonedasConstants } from '../../common/constants/monedas.constants';
 
-export class RegisterDto {
+export class UpdateProfileDto {
   @ApiProperty({ example: 'Juan Pérez', description: 'Nombre completo del usuario' })
   @IsNotEmpty({ message: 'El nombre es requerido' })
+  @IsString({ message: 'El nombre debe ser un texto' })
   nombre: string;
-
-  @ApiProperty({ example: 'usuario@example.com', description: 'Email del usuario' })
-  @IsEmail({}, { message: 'El email no es válido' })
-  @IsNotEmpty({ message: 'El email es requerido' })
-  email: string;
-
-  @ApiProperty({ example: 'password123', description: 'Contraseña del usuario', minLength: 6 })
-  @IsNotEmpty({ message: 'La contraseña es requerida' })
-  @MinLength(6, { message: 'La contraseña debe tener al menos 6 caracteres' })
-  password: string;
 
   @ApiProperty({ example: '+50212345678', description: 'Teléfono del usuario (opcional)', required: false })
   @IsOptional()

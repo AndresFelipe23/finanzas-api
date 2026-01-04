@@ -66,9 +66,60 @@ BEGIN
             END
         END
         
-        -- Usar fecha actual si no se proporciona (con precisión), sin truncar
+        -- Si se proporciona fecha, usar la fecha del usuario pero con la hora actual del sistema
+        -- Si no se proporciona, usar fecha y hora actual del sistema
+        -- Convertir a zona horaria America/Bogota (UTC-5)
+        DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
+
         IF @FechaTransaccion IS NULL
-            SET @FechaTransaccion = GETDATE()
+            SET @FechaTransaccion = @FechaHoraLocal
+        ELSE
+        BEGIN
+            -- Combinar la fecha proporcionada con la hora actual del sistema (en hora local)
+            DECLARE @HoraActual TIME = CAST(@FechaHoraLocal AS TIME);
+            DECLARE @FechaSolo DATE = CAST(@FechaTransaccion AS DATE);
+            -- Combinar fecha y hora: convertir DATE a DATETIME2 y agregar la hora usando DATEADD
+            SET @FechaTransaccion = DATEADD(HOUR, DATEPART(HOUR, @HoraActual),
+                DATEADD(MINUTE, DATEPART(MINUTE, @HoraActual),
+                DATEADD(SECOND, DATEPART(SECOND, @HoraActual),
+                DATEADD(MILLISECOND, DATEPART(MILLISECOND, @HoraActual),
+                CAST(@FechaSolo AS DATETIME2(7))))));
+        END
+        
+        -- Obtener ID del tipo GASTO (se usará para validación de saldo y recálculo de presupuestos)
+        DECLARE @TipoGastoId BIGINT = NULL;
+        SELECT @TipoGastoId = id FROM tipos_transaccion WHERE nombre = 'GASTO' AND activo = 1;
+        
+        -- Validar que se obtuvo el tipo GASTO
+        IF @TipoGastoId IS NULL
+        BEGIN
+            RAISERROR('No se encontró el tipo de transacción GASTO en el sistema', 16, 1);
+            RETURN;
+        END
+        
+        -- Validar saldo suficiente si es un GASTO y tiene cuenta asociada
+        IF @CuentaId IS NOT NULL
+        BEGIN
+            -- Si es un gasto, verificar que el saldo sea suficiente
+            IF @TipoTransaccionId = @TipoGastoId
+            BEGIN
+                DECLARE @SaldoActual DECIMAL(18,2);
+                EXEC sp_cuenta_get_saldo @CuentaId = @CuentaId, @UsuarioId = @UsuarioId, @Saldo = @SaldoActual OUTPUT;
+                
+                IF @SaldoActual < @Monto
+                BEGIN
+                    DECLARE @MensajeError NVARCHAR(500) = FORMATMESSAGE(
+                        'Saldo insuficiente. Saldo disponible: %s %s, Monto requerido: %s %s',
+                        FORMAT(@SaldoActual, 'N2'),
+                        @Moneda,
+                        FORMAT(@Monto, 'N2'),
+                        @Moneda
+                    );
+                    RAISERROR(@MensajeError, 16, 1);
+                    RETURN;
+                END
+            END
+        END
         
         -- Insertar la transacción
         INSERT INTO transacciones (
@@ -103,10 +154,25 @@ BEGIN
             @Notas,
             @Repetir,
             1,
-            CAST(GETDATE() AS DATETIME2(0))
+            CAST(@FechaHoraLocal AS DATETIME2(0))
         )
         
+        -- Recalcular presupuestos afectados si es un GASTO
+        -- Comentado temporalmente para evitar errores - se puede activar después
+        -- IF @TipoTransaccionId = @TipoGastoId AND @TipoGastoId IS NOT NULL
+        -- BEGIN
+        --     -- Recalcular presupuestos afectados (implementación futura)
+        -- END
+        
         -- Retornar la transacción creada
+        DECLARE @NewTransaccionId BIGINT = SCOPE_IDENTITY();
+        
+        IF @NewTransaccionId IS NULL
+        BEGIN
+            RAISERROR('Error al crear la transacción: no se obtuvo el ID', 16, 1);
+            RETURN;
+        END
+        
         SELECT 
             t.id,
             t.usuario_id,
@@ -120,7 +186,7 @@ BEGIN
             t.metodo_pago_id,
             mp.nombre AS metodo_pago_nombre,
             t.monto,
-            t.moneda,
+            ISNULL(t.moneda, 'COP') AS moneda,
             t.titulo,
             t.descripcion,
             t.fecha_transaccion,
@@ -133,7 +199,7 @@ BEGIN
         LEFT JOIN tipos_transaccion tt ON t.tipo_transaccion_id = tt.id
         LEFT JOIN categorias c ON t.categoria_id = c.id
         LEFT JOIN metodos_pago mp ON t.metodo_pago_id = mp.id
-        WHERE t.id = SCOPE_IDENTITY()
+        WHERE t.id = @NewTransaccionId
         
     END TRY
     BEGIN CATCH
@@ -201,6 +267,20 @@ BEGIN
             END
         END
         
+        -- Obtener valores antiguos para recalcular presupuestos afectados
+        DECLARE @FechaTransaccionAnterior DATETIME2(7);
+        DECLARE @CategoriaIdAnterior BIGINT;
+        DECLARE @CuentaIdAnterior BIGINT;
+        DECLARE @TipoTransaccionIdAnterior BIGINT;
+        
+        SELECT 
+            @FechaTransaccionAnterior = fecha_transaccion,
+            @CategoriaIdAnterior = categoria_id,
+            @CuentaIdAnterior = cuenta_id,
+            @TipoTransaccionIdAnterior = tipo_transaccion_id
+        FROM transacciones
+        WHERE id = @Id;
+        
         -- Actualizar solo los campos proporcionados
         UPDATE transacciones
         SET
@@ -218,6 +298,64 @@ BEGIN
             repetir = ISNULL(@Repetir, repetir),
             activa = ISNULL(@Activa, activa)
         WHERE id = @Id
+        
+        -- Obtener valores nuevos
+        DECLARE @FechaTransaccionNueva DATETIME2(7);
+        DECLARE @CategoriaIdNueva BIGINT;
+        DECLARE @CuentaIdNueva BIGINT;
+        DECLARE @TipoTransaccionIdNuevo BIGINT;
+        
+        SELECT 
+            @FechaTransaccionNueva = fecha_transaccion,
+            @CategoriaIdNueva = categoria_id,
+            @CuentaIdNueva = cuenta_id,
+            @TipoTransaccionIdNuevo = tipo_transaccion_id
+        FROM transacciones
+        WHERE id = @Id;
+        
+        -- Recalcular presupuestos afectados si es un GASTO o si cambió a GASTO
+        DECLARE @TipoGastoId BIGINT;
+        SELECT @TipoGastoId = id FROM tipos_transaccion WHERE nombre = 'GASTO' AND activo = 1;
+        
+        IF @TipoTransaccionIdNuevo = @TipoGastoId OR @TipoTransaccionIdAnterior = @TipoGastoId
+        BEGIN
+            -- Buscar presupuestos afectados (tanto por valores antiguos como nuevos)
+            DECLARE @PresupuestoId BIGINT;
+            DECLARE presupuestos_cursor CURSOR FOR
+                SELECT DISTINCT id
+                FROM presupuestos
+                WHERE usuario_id = @UsuarioId
+                  AND activo = 1
+                  AND (
+                      -- Presupuestos afectados por valores antiguos
+                      (@FechaTransaccionAnterior >= fecha_inicio AND @FechaTransaccionAnterior <= DATEADD(SECOND, 86399, fecha_fin)
+                       AND (categoria_id IS NULL OR categoria_id = @CategoriaIdAnterior)
+                       AND (cuenta_id IS NULL OR cuenta_id = @CuentaIdAnterior))
+                      OR
+                      -- Presupuestos afectados por valores nuevos
+                      (@FechaTransaccionNueva >= fecha_inicio AND @FechaTransaccionNueva <= DATEADD(SECOND, 86399, fecha_fin)
+                       AND (categoria_id IS NULL OR categoria_id = @CategoriaIdNueva)
+                       AND (cuenta_id IS NULL OR cuenta_id = @CuentaIdNueva))
+                  );
+            
+            OPEN presupuestos_cursor;
+            FETCH NEXT FROM presupuestos_cursor INTO @PresupuestoId;
+            
+            WHILE @@FETCH_STATUS = 0
+            BEGIN
+                BEGIN TRY
+                    EXEC sp_presupuesto_recalc_gasto @Id = @PresupuestoId, @UsuarioId = @UsuarioId;
+                END TRY
+                BEGIN CATCH
+                    -- Continuar con el siguiente presupuesto si hay error
+                END CATCH
+                
+                FETCH NEXT FROM presupuestos_cursor INTO @PresupuestoId;
+            END
+            
+            CLOSE presupuestos_cursor;
+            DEALLOCATE presupuestos_cursor;
+        END
         
         -- Retornar la transacción actualizada
         SELECT 
@@ -271,10 +409,61 @@ BEGIN
             RETURN;
         END
         
+        -- Obtener información de la transacción antes de eliminarla para recalcular presupuestos
+        DECLARE @FechaTransaccion DATETIME2(7);
+        DECLARE @CategoriaId BIGINT;
+        DECLARE @CuentaId BIGINT;
+        DECLARE @TipoTransaccionId BIGINT;
+        
+        SELECT 
+            @FechaTransaccion = fecha_transaccion,
+            @CategoriaId = categoria_id,
+            @CuentaId = cuenta_id,
+            @TipoTransaccionId = tipo_transaccion_id
+        FROM transacciones
+        WHERE id = @Id;
+        
         -- Soft delete
         UPDATE transacciones
         SET activa = 0
         WHERE id = @Id
+        
+        -- Recalcular presupuestos afectados si era un GASTO
+        DECLARE @TipoGastoId BIGINT;
+        SELECT @TipoGastoId = id FROM tipos_transaccion WHERE nombre = 'GASTO' AND activo = 1;
+        
+        IF @TipoTransaccionId = @TipoGastoId
+        BEGIN
+            -- Buscar presupuestos que podrían verse afectados por esta transacción
+            DECLARE @PresupuestoId BIGINT;
+            DECLARE presupuestos_cursor CURSOR FOR
+                SELECT id
+                FROM presupuestos
+                WHERE usuario_id = @UsuarioId
+                  AND activo = 1
+                  AND @FechaTransaccion >= fecha_inicio
+                  AND @FechaTransaccion <= DATEADD(SECOND, 86399, fecha_fin)
+                  AND (categoria_id IS NULL OR categoria_id = @CategoriaId)
+                  AND (cuenta_id IS NULL OR cuenta_id = @CuentaId);
+            
+            OPEN presupuestos_cursor;
+            FETCH NEXT FROM presupuestos_cursor INTO @PresupuestoId;
+            
+            WHILE @@FETCH_STATUS = 0
+            BEGIN
+                BEGIN TRY
+                    EXEC sp_presupuesto_recalc_gasto @Id = @PresupuestoId, @UsuarioId = @UsuarioId;
+                END TRY
+                BEGIN CATCH
+                    -- Continuar con el siguiente presupuesto si hay error
+                END CATCH
+                
+                FETCH NEXT FROM presupuestos_cursor INTO @PresupuestoId;
+            END
+            
+            CLOSE presupuestos_cursor;
+            DEALLOCATE presupuestos_cursor;
+        END
         
         SELECT 1 AS success
         
@@ -353,9 +542,25 @@ BEGIN
             RETURN;
         END
         
-        -- Usar fecha actual si no se proporciona
+        -- Si se proporciona fecha, usar la fecha del usuario pero con la hora actual del sistema
+        -- Si no se proporciona, usar fecha y hora actual del sistema
+        -- Convertir a zona horaria America/Bogota (UTC-5)
+        DECLARE @FechaHoraLocal2 DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
+
         IF @FechaTransaccion IS NULL
-            SET @FechaTransaccion = GETDATE()
+            SET @FechaTransaccion = @FechaHoraLocal2
+        ELSE
+        BEGIN
+            -- Combinar la fecha proporcionada con la hora actual del sistema (en hora local)
+            DECLARE @HoraActual2 TIME = CAST(@FechaHoraLocal2 AS TIME);
+            DECLARE @FechaSolo2 DATE = CAST(@FechaTransaccion AS DATE);
+            -- Combinar fecha y hora: convertir DATE a DATETIME2 y agregar la hora usando DATEADD
+            SET @FechaTransaccion = DATEADD(HOUR, DATEPART(HOUR, @HoraActual2),
+                DATEADD(MINUTE, DATEPART(MINUTE, @HoraActual2),
+                DATEADD(SECOND, DATEPART(SECOND, @HoraActual2),
+                DATEADD(MILLISECOND, DATEPART(MILLISECOND, @HoraActual2),
+                CAST(@FechaSolo2 AS DATETIME2(7))))));
+        END
         
         -- Crear título por defecto si no se proporciona
         IF @Titulo IS NULL
@@ -377,25 +582,56 @@ BEGIN
         )
         VALUES (
             @UsuarioId, @CuentaOrigenId, @TipoGastoId, NULL, NULL,
-            @Monto, @Moneda, @Titulo, @Descripcion, @FechaTransaccion, NULL, @Notas, 0, 1, GETDATE()
+            @Monto, @Moneda, @Titulo, @Descripcion, @FechaTransaccion, NULL, @Notas, 0, 1, @FechaHoraLocal2
         )
-        
+
         DECLARE @TransaccionOrigenId BIGINT = SCOPE_IDENTITY();
-        
+
         -- Crear la transacción de entrada (INGRESO en cuenta destino)
         DECLARE @TipoIngresoId BIGINT;
         SELECT @TipoIngresoId = id FROM tipos_transaccion WHERE nombre = 'INGRESO' AND activo = 1;
-        
+
         INSERT INTO transacciones (
             usuario_id, cuenta_id, tipo_transaccion_id, categoria_id, metodo_pago_id,
             monto, moneda, titulo, descripcion, fecha_transaccion, archivo_adjunto, notas, repetir, activa, fecha_creacion
         )
         VALUES (
             @UsuarioId, @CuentaDestinoId, @TipoIngresoId, NULL, NULL,
-            @Monto, @Moneda, @Titulo, @Descripcion, @FechaTransaccion, NULL, @Notas, 0, 1, GETDATE()
+            @Monto, @Moneda, @Titulo, @Descripcion, @FechaTransaccion, NULL, @Notas, 0, 1, @FechaHoraLocal2
         )
         
         DECLARE @TransaccionDestinoId BIGINT = SCOPE_IDENTITY();
+        
+        -- Recalcular presupuestos afectados por la transacción de GASTO (cuenta origen)
+        -- La transacción de INGRESO no afecta presupuestos
+        DECLARE @PresupuestoId BIGINT;
+        DECLARE presupuestos_cursor CURSOR FOR
+            SELECT id
+            FROM presupuestos
+            WHERE usuario_id = @UsuarioId
+              AND activo = 1
+              AND @FechaTransaccion >= fecha_inicio
+              AND @FechaTransaccion <= DATEADD(SECOND, 86399, fecha_fin)
+              AND (categoria_id IS NULL)  -- Transferencias no tienen categoría
+              AND (cuenta_id IS NULL OR cuenta_id = @CuentaOrigenId);
+        
+        OPEN presupuestos_cursor;
+        FETCH NEXT FROM presupuestos_cursor INTO @PresupuestoId;
+        
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+            BEGIN TRY
+                EXEC sp_presupuesto_recalc_gasto @Id = @PresupuestoId, @UsuarioId = @UsuarioId;
+            END TRY
+            BEGIN CATCH
+                -- Continuar con el siguiente presupuesto si hay error
+            END CATCH
+            
+            FETCH NEXT FROM presupuestos_cursor INTO @PresupuestoId;
+        END
+        
+        CLOSE presupuestos_cursor;
+        DEALLOCATE presupuestos_cursor;
         
         -- Retornar ambas transacciones
         SELECT 

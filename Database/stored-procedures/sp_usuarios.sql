@@ -68,6 +68,7 @@ CREATE OR ALTER PROCEDURE sp_usuario_create
     @Telefono NVARCHAR(20) = NULL,
     @FechaNacimiento DATETIME2 = NULL,
     @MonedaPredeterminada NVARCHAR(10) = 'COP',
+    @FechaCreacion DATETIME2 = NULL,
     @UsuarioId BIGINT OUTPUT
 AS
 BEGIN
@@ -79,6 +80,9 @@ BEGIN
         RAISERROR('El email ya está registrado', 16, 1);
         RETURN;
     END
+    
+    -- Usar la fecha proporcionada o la fecha actual del servidor como fallback
+    DECLARE @FechaActual DATETIME2 = COALESCE(@FechaCreacion, SYSDATETIME());
     
     -- Insertar el nuevo usuario
     INSERT INTO usuarios (
@@ -100,8 +104,8 @@ BEGIN
         @FechaNacimiento,
         @MonedaPredeterminada,
         1,
-        GETDATE(),
-        GETDATE()
+        @FechaActual,
+        @FechaActual
     );
     
     SET @UsuarioId = SCOPE_IDENTITY();

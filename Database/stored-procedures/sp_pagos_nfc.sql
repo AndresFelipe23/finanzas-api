@@ -45,14 +45,16 @@ BEGIN
     IF (@TipoGastoId IS NULL) RAISERROR('Tipo de transacción GASTO no definido', 16, 1);
 
     -- Insertar transacción (GASTO)
+    -- Siempre usar la fecha y hora actual del servidor para fecha_transaccion
     DECLARE @TransaccionId BIGINT;
+    DECLARE @FechaActual DATETIME2(7) = GETDATE();
     INSERT INTO dbo.transacciones (
       usuario_id, cuenta_id, tipo_transaccion_id, categoria_id, metodo_pago_id,
       monto, moneda, titulo, descripcion, fecha_transaccion, archivo_adjunto, notas, repetir, activa, fecha_creacion
     )
     VALUES (
       @UsuarioId, @CuentaIdFinal, @TipoGastoId, @CategoriaId, NULL,
-      @Monto, @Moneda, N'Pago NFC', @Descripcion, COALESCE(@FechaTransaccion, GETDATE()), NULL, NULL, 0, 1, GETDATE()
+      @Monto, @Moneda, N'Pago NFC', @Descripcion, @FechaActual, NULL, NULL, 0, 1, @FechaActual
     );
     SET @TransaccionId = SCOPE_IDENTITY();
 
@@ -63,7 +65,7 @@ BEGIN
     )
     VALUES (
       @UsuarioId, @TarjetaId, @TransaccionId, @DispositivoNfcId,
-      @Ubicacion, @Lat, @Lon, COALESCE(@FechaTransaccion, GETDATE())
+      @Ubicacion, @Lat, @Lon, @FechaActual
     );
 
     -- Resultado

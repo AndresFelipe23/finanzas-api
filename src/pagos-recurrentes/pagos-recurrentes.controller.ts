@@ -1,59 +1,71 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { PagosRecurrentesService } from './pagos-recurrentes.service';
 import { CreatePagoRecurrenteDto } from './dto/create-pago-recurrente.dto';
 import { UpdatePagoRecurrenteDto } from './dto/update-pago-recurrente.dto';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { CurrentUserId } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Pagos Recurrentes')
 @Controller('pagos-recurrentes')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth()
 export class PagosRecurrentesController {
   constructor(private readonly service: PagosRecurrentesService) {}
 
   @Post()
   @ApiOperation({ summary: 'Crear pago recurrente' })
-  @ApiBearerAuth()
-  create(@Body() dto: CreatePagoRecurrenteDto) {
-    const usuarioId = 1; // TODO JWT
+  create(
+    @Body() dto: CreatePagoRecurrenteDto,
+    @CurrentUserId() usuarioId: number,
+  ) {
     return this.service.create(usuarioId, dto);
   }
 
   @Get()
   @ApiOperation({ summary: 'Listar pagos recurrentes' })
-  @ApiBearerAuth()
-  findAll() {
-    const usuarioId = 1; // TODO JWT
+  findAll(
+    @CurrentUserId() usuarioId: number,
+  ) {
     return this.service.findAll(usuarioId);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Obtener pago recurrente' })
-  @ApiBearerAuth()
-  findOne(@Param('id') id: string) {
-    const usuarioId = 1; // TODO JWT
+  findOne(
+    @Param('id') id: string,
+    @CurrentUserId() usuarioId: number,
+  ) {
     return this.service.findOne(usuarioId, parseInt(id));
   }
 
   @Patch(':id')
   @ApiOperation({ summary: 'Actualizar pago recurrente' })
-  @ApiBearerAuth()
-  update(@Param('id') id: string, @Body() dto: UpdatePagoRecurrenteDto) {
-    const usuarioId = 1; // TODO JWT
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdatePagoRecurrenteDto,
+    @CurrentUserId() usuarioId: number,
+  ) {
     return this.service.update(usuarioId, parseInt(id), dto);
   }
 
   @Patch(':id/toggle')
   @ApiOperation({ summary: 'Activar/Desactivar pago recurrente' })
-  @ApiBearerAuth()
-  toggle(@Param('id') id: string, @Query('activo') activo: string) {
-    const usuarioId = 1; // TODO JWT
+  toggle(
+    @Param('id') id: string,
+    @Query('activo') activo: string,
+    @CurrentUserId() usuarioId: number,
+  ) {
     return this.service.toggle(usuarioId, parseInt(id), activo === 'true');
   }
 
   @Post(':id/ejecutar')
   @ApiOperation({ summary: 'Ejecutar ahora (crear transacción)' })
-  @ApiBearerAuth()
-  ejecutar(@Param('id') id: string, @Body('fecha') fecha?: string) {
-    const usuarioId = 1; // TODO JWT
+  ejecutar(
+    @Param('id') id: string,
+    @Body('fecha') fecha: string | undefined,
+    @CurrentUserId() usuarioId: number,
+  ) {
     return this.service.executeNow(usuarioId, parseInt(id), fecha);
   }
 }

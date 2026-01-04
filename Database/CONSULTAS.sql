@@ -23,9 +23,8 @@ SELECT * FROM pagos_nfc
 SELECT * FROM dispositivos_nfc
 
 
---DELETE presupuestos
---DELETE transacciones
---DELETE transacciones
+--DELETE prestamos WHERE id = 7
+--DELETE transacciones WHERE id = 58
 --DELETE cuentas
 --DELETE categorias WHERE id = 14
 --DELETE dispositivos_nfc WHERE id = 2

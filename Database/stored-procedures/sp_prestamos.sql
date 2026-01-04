@@ -76,9 +76,22 @@ IF COL_LENGTH('dbo.prestamos', 'monto_total') IS NULL
 BEGIN
   ALTER TABLE dbo.prestamos ADD monto_total DECIMAL(18,2) NOT NULL CONSTRAINT DF_prestamos_monto_total DEFAULT(0);
 END;
+IF COL_LENGTH('dbo.prestamos', 'monto_pagado') IS NULL
+BEGIN
+  ALTER TABLE dbo.prestamos ADD monto_pagado DECIMAL(18,2) NOT NULL CONSTRAINT DF_prestamos_monto_pagado DEFAULT(0);
+END;
+IF COL_LENGTH('dbo.prestamos', 'monto_pendiente') IS NULL
+BEGIN
+  ALTER TABLE dbo.prestamos ADD monto_pendiente AS (monto_total - monto_pagado) PERSISTED;
+END;
 IF COL_LENGTH('dbo.prestamos', 'saldo_pendiente') IS NULL
 BEGIN
   ALTER TABLE dbo.prestamos ADD saldo_pendiente DECIMAL(18,2) NOT NULL CONSTRAINT DF_prestamos_saldo_pendiente DEFAULT(0);
+END;
+IF COL_LENGTH('dbo.prestamos', 'estado') IS NULL
+BEGIN
+  ALTER TABLE dbo.prestamos ADD estado NVARCHAR(20) NOT NULL CONSTRAINT DF_prestamos_estado DEFAULT('PENDIENTE');
+  ALTER TABLE dbo.prestamos ADD CONSTRAINT CK_prestamos_estado CHECK (estado IN ('PENDIENTE', 'PAGADO', 'CANCELADO'));
 END;
 IF COL_LENGTH('dbo.prestamos', 'tasa_interes') IS NULL
 BEGIN
@@ -178,61 +191,69 @@ BEGIN
     IF (@MontoTotal IS NULL OR @MontoTotal <= 0)
       RAISERROR('El monto total debe ser mayor a 0', 16, 1);
 
-    SET @FechaInicio = CAST(ISNULL(@FechaInicio, GETDATE()) AS DATETIME2(0));
+    -- Convertir a zona horaria America/Bogota (UTC-5)
+    DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
+    
+    SET @FechaInicio = CAST(ISNULL(@FechaInicio, @FechaHoraLocal) AS DATETIME2(0));
     IF (@FechaFin IS NOT NULL)
       SET @FechaFin = CAST(@FechaFin AS DATETIME2(0));
 
     DECLARE @NombrePersona NVARCHAR(200) = COALESCE(NULLIF(LTRIM(RTRIM(@NombreDeudorPrestador)), ''), NULLIF(LTRIM(RTRIM(@Notas)), ''), @Nombre);
     DECLARE @FechaPrestamo DATETIME2(0) = @FechaInicio;
 
+    DECLARE @FechaCreacion DATETIME2(0) = CAST(@FechaHoraLocal AS DATETIME2(0));
+    DECLARE @MontoPagado DECIMAL(18,2) = 0;
+    DECLARE @SaldoPendiente DECIMAL(18,2) = @MontoTotal;
+    DECLARE @Estado NVARCHAR(20) = 'PENDIENTE';
+
     IF COL_LENGTH('dbo.prestamos','nombre_deudor_prestador') IS NOT NULL AND COL_LENGTH('dbo.prestamos','fecha_prestamo') IS NOT NULL
     BEGIN
       INSERT INTO dbo.prestamos (
-        usuario_id, cuenta_id, nombre, tipo, monto_total, saldo_pendiente,
-        tasa_interes, fecha_inicio, fecha_fin, notas, activa, fecha_creacion, fecha_actualizacion,
+        usuario_id, cuenta_id, nombre, tipo, monto_total, monto_pagado, saldo_pendiente,
+        tasa_interes, fecha_inicio, fecha_fin, notas, activa, estado, fecha_creacion, fecha_actualizacion,
         nombre_deudor_prestador, fecha_prestamo
       )
       VALUES (
-        @UsuarioId, @CuentaId, @Nombre, @Tipo, @MontoTotal, @MontoTotal,
-        @TasaInteres, @FechaInicio, @FechaFin, @Notas, 1, CAST(GETDATE() AS DATETIME2(0)), CAST(GETDATE() AS DATETIME2(0)),
+        @UsuarioId, @CuentaId, @Nombre, @Tipo, @MontoTotal, @MontoPagado, @SaldoPendiente,
+        @TasaInteres, @FechaInicio, @FechaFin, @Notas, 1, @Estado, @FechaCreacion, @FechaCreacion,
         @NombrePersona, @FechaPrestamo
       );
     END
     ELSE IF COL_LENGTH('dbo.prestamos','nombre_deudor_prestador') IS NOT NULL AND COL_LENGTH('dbo.prestamos','fecha_prestamo') IS NULL
     BEGIN
       INSERT INTO dbo.prestamos (
-        usuario_id, cuenta_id, nombre, tipo, monto_total, saldo_pendiente,
-        tasa_interes, fecha_inicio, fecha_fin, notas, activa, fecha_creacion, fecha_actualizacion,
+        usuario_id, cuenta_id, nombre, tipo, monto_total, monto_pagado, saldo_pendiente,
+        tasa_interes, fecha_inicio, fecha_fin, notas, activa, estado, fecha_creacion, fecha_actualizacion,
         nombre_deudor_prestador
       )
       VALUES (
-        @UsuarioId, @CuentaId, @Nombre, @Tipo, @MontoTotal, @MontoTotal,
-        @TasaInteres, @FechaInicio, @FechaFin, @Notas, 1, CAST(GETDATE() AS DATETIME2(0)), CAST(GETDATE() AS DATETIME2(0)),
+        @UsuarioId, @CuentaId, @Nombre, @Tipo, @MontoTotal, @MontoPagado, @SaldoPendiente,
+        @TasaInteres, @FechaInicio, @FechaFin, @Notas, 1, @Estado, @FechaCreacion, @FechaCreacion,
         @NombrePersona
       );
     END
     ELSE IF COL_LENGTH('dbo.prestamos','nombre_deudor_prestador') IS NULL AND COL_LENGTH('dbo.prestamos','fecha_prestamo') IS NOT NULL
     BEGIN
       INSERT INTO dbo.prestamos (
-        usuario_id, cuenta_id, nombre, tipo, monto_total, saldo_pendiente,
-        tasa_interes, fecha_inicio, fecha_fin, notas, activa, fecha_creacion, fecha_actualizacion,
+        usuario_id, cuenta_id, nombre, tipo, monto_total, monto_pagado, saldo_pendiente,
+        tasa_interes, fecha_inicio, fecha_fin, notas, activa, estado, fecha_creacion, fecha_actualizacion,
         fecha_prestamo
       )
       VALUES (
-        @UsuarioId, @CuentaId, @Nombre, @Tipo, @MontoTotal, @MontoTotal,
-        @TasaInteres, @FechaInicio, @FechaFin, @Notas, 1, CAST(GETDATE() AS DATETIME2(0)), CAST(GETDATE() AS DATETIME2(0)),
+        @UsuarioId, @CuentaId, @Nombre, @Tipo, @MontoTotal, @MontoPagado, @SaldoPendiente,
+        @TasaInteres, @FechaInicio, @FechaFin, @Notas, 1, @Estado, @FechaCreacion, @FechaCreacion,
         @FechaPrestamo
       );
     END
     ELSE
     BEGIN
       INSERT INTO dbo.prestamos (
-        usuario_id, cuenta_id, nombre, tipo, monto_total, saldo_pendiente,
-        tasa_interes, fecha_inicio, fecha_fin, notas, activa, fecha_creacion, fecha_actualizacion
+        usuario_id, cuenta_id, nombre, tipo, monto_total, monto_pagado, saldo_pendiente,
+        tasa_interes, fecha_inicio, fecha_fin, notas, activa, estado, fecha_creacion, fecha_actualizacion
       )
       VALUES (
-        @UsuarioId, @CuentaId, @Nombre, @Tipo, @MontoTotal, @MontoTotal,
-        @TasaInteres, @FechaInicio, @FechaFin, @Notas, 1, CAST(GETDATE() AS DATETIME2(0)), CAST(GETDATE() AS DATETIME2(0))
+        @UsuarioId, @CuentaId, @Nombre, @Tipo, @MontoTotal, @MontoPagado, @SaldoPendiente,
+        @TasaInteres, @FechaInicio, @FechaFin, @Notas, 1, @Estado, @FechaCreacion, @FechaCreacion
       );
     END
 
@@ -270,6 +291,9 @@ BEGIN
     DECLARE @Exists INT = (SELECT COUNT(1) FROM dbo.prestamos WHERE id=@Id AND usuario_id=@UsuarioId);
     IF (@Exists = 0) RAISERROR('Préstamo no encontrado',16,1);
 
+    -- Convertir a zona horaria America/Bogota (UTC-5)
+    DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
+
     IF COL_LENGTH('dbo.prestamos','nombre_deudor_prestador') IS NOT NULL
     BEGIN
       UPDATE dbo.prestamos
@@ -284,7 +308,7 @@ BEGIN
         notas = COALESCE(@Notas, notas),
         activa = COALESCE(@Activa, activa),
         nombre_deudor_prestador = COALESCE(NULLIF(LTRIM(RTRIM(@NombreDeudorPrestador)), ''), nombre_deudor_prestador),
-        fecha_actualizacion = CAST(GETDATE() AS DATETIME2(0))
+        fecha_actualizacion = CAST(@FechaHoraLocal AS DATETIME2(0))
       WHERE id=@Id AND usuario_id=@UsuarioId;
     END
     ELSE
@@ -300,7 +324,7 @@ BEGIN
         cuenta_id = COALESCE(@CuentaId, cuenta_id),
         notas = COALESCE(@Notas, notas),
         activa = COALESCE(@Activa, activa),
-        fecha_actualizacion = CAST(GETDATE() AS DATETIME2(0))
+        fecha_actualizacion = CAST(@FechaHoraLocal AS DATETIME2(0))
       WHERE id=@Id AND usuario_id=@UsuarioId;
     END
 
@@ -324,8 +348,11 @@ BEGIN
     IF (@Id IS NULL OR @Id <= 0) RAISERROR('Id inválido',16,1);
     IF (@UsuarioId IS NULL OR @UsuarioId <= 0) RAISERROR('Usuario inválido',16,1);
 
+    -- Convertir a zona horaria America/Bogota (UTC-5)
+    DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
+
     UPDATE dbo.prestamos
-    SET activa = @Activa, fecha_actualizacion = CAST(GETDATE() AS DATETIME2(0))
+    SET activa = @Activa, fecha_actualizacion = CAST(@FechaHoraLocal AS DATETIME2(0))
     WHERE id=@Id AND usuario_id=@UsuarioId;
 
     SELECT * FROM dbo.prestamos WHERE id=@Id AND usuario_id=@UsuarioId;
@@ -407,34 +434,48 @@ BEGIN
     IF (@Monto IS NULL OR @Monto <= 0) RAISERROR('El monto del pago debe ser mayor a 0',16,1);
     IF (@PrestamoId IS NULL OR @PrestamoId <= 0) RAISERROR('Prestamo inválido',16,1);
 
-    DECLARE @PUsuario BIGINT, @Saldo DECIMAL(18,2), @MontoTotal DECIMAL(18,2);
-    SELECT @PUsuario = usuario_id, @Saldo = saldo_pendiente, @MontoTotal = monto_total
+    DECLARE @PUsuario BIGINT, @MontoPagadoActual DECIMAL(18,2), @MontoTotal DECIMAL(18,2);
+    SELECT @PUsuario = usuario_id, @MontoPagadoActual = ISNULL(monto_pagado, 0), @MontoTotal = monto_total
     FROM dbo.prestamos WHERE id=@PrestamoId;
 
     IF (@PUsuario IS NULL) RAISERROR('Préstamo no encontrado',16,1);
     IF (@PUsuario <> @UsuarioId) RAISERROR('No autorizado',16,1);
 
-    SET @FechaPago = CAST(ISNULL(@FechaPago, GETDATE()) AS DATETIME2(0));
+    -- Convertir a zona horaria America/Bogota (UTC-5)
+    DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
+    SET @FechaPago = CAST(ISNULL(@FechaPago, @FechaHoraLocal) AS DATETIME2(0));
 
     BEGIN TRAN;
 
+    DECLARE @FechaCreacion DATETIME2(0) = CAST(@FechaHoraLocal AS DATETIME2(0));
+
     IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pagos_prestamos') AND name = 'monto_pago')
     BEGIN
-      INSERT INTO dbo.pagos_prestamos (prestamo_id, cuenta_id, monto_pago, fecha_pago, notas)
-      VALUES (@PrestamoId, @CuentaId, @Monto, @FechaPago, @Notas);
+      INSERT INTO dbo.pagos_prestamos (prestamo_id, cuenta_id, monto_pago, fecha_pago, notas, fecha_creacion)
+      VALUES (@PrestamoId, @CuentaId, @Monto, @FechaPago, @Notas, @FechaCreacion);
     END
     ELSE
     BEGIN
-      INSERT INTO dbo.pagos_prestamos (prestamo_id, cuenta_id, monto, fecha_pago, notas)
-      VALUES (@PrestamoId, @CuentaId, @Monto, @FechaPago, @Notas);
+      INSERT INTO dbo.pagos_prestamos (prestamo_id, cuenta_id, monto, fecha_pago, notas, fecha_creacion)
+      VALUES (@PrestamoId, @CuentaId, @Monto, @FechaPago, @Notas, @FechaCreacion);
     END
 
+    DECLARE @NuevoMontoPagado DECIMAL(18,2) = @MontoPagadoActual + @Monto;
+    DECLARE @MontoPagadoFinal DECIMAL(18,2) = CASE 
+                         WHEN @NuevoMontoPagado > @MontoTotal THEN @MontoTotal
+                         ELSE @NuevoMontoPagado 
+                       END;
+    DECLARE @NuevoSaldoPendiente DECIMAL(18,2) = @MontoTotal - @MontoPagadoFinal;
+    
     UPDATE dbo.prestamos
-    SET saldo_pendiente = CASE 
-                             WHEN @Saldo - @Monto < 0 THEN 0 
-                             ELSE @Saldo - @Monto 
-                           END,
-        fecha_actualizacion = CAST(GETDATE() AS DATETIME2(0))
+    SET monto_pagado = @MontoPagadoFinal,
+        saldo_pendiente = @NuevoSaldoPendiente,
+        estado = CASE 
+                   WHEN @NuevoMontoPagado >= @MontoTotal THEN 'PAGADO'
+                   WHEN @NuevoMontoPagado = 0 THEN 'PENDIENTE'
+                   ELSE estado
+                 END,
+        fecha_actualizacion = CAST(@FechaHoraLocal AS DATETIME2(0))
     WHERE id=@PrestamoId;
 
     COMMIT TRAN;
@@ -463,13 +504,17 @@ BEGIN
   BEGIN TRY
     IF (@PagoId IS NULL OR @PagoId <= 0) RAISERROR('Pago inválido',16,1);
 
-    DECLARE @PrestamoId BIGINT, @PUsuario BIGINT, @MontoAnterior DECIMAL(18,2);
+    DECLARE @PrestamoId BIGINT, @PUsuario BIGINT, @MontoAnterior DECIMAL(18,2), @MontoPagadoPrestamo DECIMAL(18,2), @MontoTotalPrestamo DECIMAL(18,2);
     SELECT @PrestamoId = prestamo_id, @MontoAnterior = COALESCE(monto, monto_pago)
     FROM dbo.pagos_prestamos WHERE id=@PagoId;
 
     IF (@PrestamoId IS NULL) RAISERROR('Pago no encontrado',16,1);
-    SELECT @PUsuario = usuario_id FROM dbo.prestamos WHERE id=@PrestamoId;
+    SELECT @PUsuario = usuario_id, @MontoPagadoPrestamo = ISNULL(monto_pagado, 0), @MontoTotalPrestamo = monto_total
+    FROM dbo.prestamos WHERE id=@PrestamoId;
     IF (@PUsuario <> @UsuarioId) RAISERROR('No autorizado',16,1);
+
+    -- Convertir a zona horaria America/Bogota (UTC-5)
+    DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
 
     BEGIN TRAN;
 
@@ -495,13 +540,23 @@ BEGIN
     -- Recalcular saldo en base a la diferencia del pago
     DECLARE @MontoNuevo DECIMAL(18,2) = (SELECT COALESCE(monto, monto_pago) FROM dbo.pagos_prestamos WHERE id=@PagoId);
     DECLARE @Diff DECIMAL(18,2) = ISNULL(@MontoNuevo,0) - ISNULL(@MontoAnterior,0);
+    DECLARE @NuevoMontoPagado DECIMAL(18,2) = @MontoPagadoPrestamo + @Diff;
+    DECLARE @MontoPagadoFinal DECIMAL(18,2) = CASE 
+                         WHEN @NuevoMontoPagado > @MontoTotalPrestamo THEN @MontoTotalPrestamo
+                         WHEN @NuevoMontoPagado < 0 THEN 0
+                         ELSE @NuevoMontoPagado
+                       END;
+    DECLARE @NuevoSaldoPendiente DECIMAL(18,2) = @MontoTotalPrestamo - @MontoPagadoFinal;
 
     UPDATE dbo.prestamos
-    SET saldo_pendiente = CASE 
-                             WHEN saldo_pendiente - @Diff < 0 THEN 0
-                             ELSE saldo_pendiente - @Diff
-                           END,
-        fecha_actualizacion = CAST(GETDATE() AS DATETIME2(0))
+    SET monto_pagado = @MontoPagadoFinal,
+        saldo_pendiente = @NuevoSaldoPendiente,
+        estado = CASE 
+                   WHEN @NuevoMontoPagado >= @MontoTotalPrestamo THEN 'PAGADO'
+                   WHEN @NuevoMontoPagado = 0 THEN 'PENDIENTE'
+                   ELSE estado
+                 END,
+        fecha_actualizacion = CAST(@FechaHoraLocal AS DATETIME2(0))
     WHERE id=@PrestamoId;
 
     COMMIT TRAN;
@@ -525,19 +580,33 @@ BEGIN
   BEGIN TRY
     IF (@PagoId IS NULL OR @PagoId <= 0) RAISERROR('Pago inválido',16,1);
 
-    DECLARE @PrestamoId BIGINT, @PUsuario BIGINT, @Monto DECIMAL(18,2);
+    DECLARE @PrestamoId BIGINT, @PUsuario BIGINT, @Monto DECIMAL(18,2), @MontoPagadoPrestamo DECIMAL(18,2), @MontoTotalPrestamo DECIMAL(18,2);
     SELECT @PrestamoId = prestamo_id, @Monto = COALESCE(monto, monto_pago) FROM dbo.pagos_prestamos WHERE id=@PagoId;
     IF (@PrestamoId IS NULL) RAISERROR('Pago no encontrado',16,1);
-    SELECT @PUsuario = usuario_id FROM dbo.prestamos WHERE id=@PrestamoId;
+    SELECT @PUsuario = usuario_id, @MontoPagadoPrestamo = ISNULL(monto_pagado, 0), @MontoTotalPrestamo = monto_total
+    FROM dbo.prestamos WHERE id=@PrestamoId;
     IF (@PUsuario <> @UsuarioId) RAISERROR('No autorizado',16,1);
+
+    -- Convertir a zona horaria America/Bogota (UTC-5)
+    DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
 
     BEGIN TRAN;
 
     DELETE FROM dbo.pagos_prestamos WHERE id=@PagoId;
 
+    DECLARE @NuevoMontoPagado DECIMAL(18,2) = @MontoPagadoPrestamo - ISNULL(@Monto,0);
+    DECLARE @MontoPagadoFinal DECIMAL(18,2) = CASE WHEN @NuevoMontoPagado < 0 THEN 0 ELSE @NuevoMontoPagado END;
+    DECLARE @NuevoSaldoPendiente DECIMAL(18,2) = @MontoTotalPrestamo - @MontoPagadoFinal;
+    
     UPDATE dbo.prestamos
-    SET saldo_pendiente = saldo_pendiente + ISNULL(@Monto,0),
-        fecha_actualizacion = CAST(GETDATE() AS DATETIME2(0))
+    SET monto_pagado = @MontoPagadoFinal,
+        saldo_pendiente = @NuevoSaldoPendiente,
+        estado = CASE 
+                   WHEN @NuevoMontoPagado <= 0 THEN 'PENDIENTE'
+                   WHEN @NuevoMontoPagado >= @MontoTotalPrestamo THEN 'PAGADO'
+                   ELSE estado
+                 END,
+        fecha_actualizacion = CAST(@FechaHoraLocal AS DATETIME2(0))
     WHERE id=@PrestamoId;
 
     COMMIT TRAN;

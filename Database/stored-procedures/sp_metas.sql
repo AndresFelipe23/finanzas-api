@@ -22,13 +22,17 @@ BEGIN
     IF (@MontoObjetivo IS NULL OR @MontoObjetivo <= 0)
       RAISERROR('El monto objetivo debe ser mayor a 0', 16, 1);
 
+    -- Convertir a zona horaria America/Bogota (UTC-5)
+    DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
+    DECLARE @FechaCreacion DATETIME2(0) = CAST(@FechaHoraLocal AS DATETIME2(0));
+
     INSERT INTO metas (
       usuario_id, nombre, descripcion, monto_objetivo, monto_actual,
       fecha_objetivo, icono, color, activa, fecha_creacion, fecha_actualizacion
     )
     VALUES (
       @UsuarioId, @Nombre, @Descripcion, @MontoObjetivo, 0,
-      CAST(@FechaObjetivo AS DATETIME2(0)), @Icono, @Color, 1, CAST(GETDATE() AS DATETIME2(0)), CAST(GETDATE() AS DATETIME2(0))
+      CAST(@FechaObjetivo AS DATETIME2(0)), @Icono, @Color, 1, @FechaCreacion, @FechaCreacion
     );
 
     DECLARE @NewId BIGINT = SCOPE_IDENTITY();
@@ -61,6 +65,9 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM metas WHERE id = @Id AND usuario_id = @UsuarioId)
       RAISERROR('Meta no encontrada', 16, 1);
 
+    -- Convertir a zona horaria America/Bogota (UTC-5)
+    DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
+
     UPDATE metas
       SET nombre              = COALESCE(@Nombre, nombre),
           descripcion         = COALESCE(@Descripcion, descripcion),
@@ -69,7 +76,7 @@ BEGIN
           icono               = COALESCE(@Icono, icono),
           color               = COALESCE(@Color, color),
           activa              = COALESCE(@Activa, activa),
-          fecha_actualizacion = CAST(GETDATE() AS DATETIME2(0))
+          fecha_actualizacion = CAST(@FechaHoraLocal AS DATETIME2(0))
     WHERE id = @Id AND usuario_id = @UsuarioId;
 
     SELECT m.* FROM metas m WHERE m.id = @Id AND m.usuario_id = @UsuarioId;
@@ -112,9 +119,12 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM metas WHERE id = @Id AND usuario_id = @UsuarioId)
       RAISERROR('Meta no encontrada', 16, 1);
 
+    -- Convertir a zona horaria America/Bogota (UTC-5)
+    DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
+
     UPDATE metas
       SET activa = @Activa,
-          fecha_actualizacion = CAST(GETDATE() AS DATETIME2(0))
+          fecha_actualizacion = CAST(@FechaHoraLocal AS DATETIME2(0))
     WHERE id = @Id AND usuario_id = @UsuarioId;
 
     SELECT m.* FROM metas m WHERE m.id = @Id AND m.usuario_id = @UsuarioId;
@@ -187,14 +197,18 @@ BEGIN
     IF EXISTS (SELECT 1 FROM metas WHERE id = @MetaId AND activa = 0)
       RAISERROR('La meta está inactiva', 16, 1);
 
+    -- Convertir a zona horaria America/Bogota (UTC-5)
+    DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
+    DECLARE @FechaAporte DATETIME2(0) = CAST(@FechaHoraLocal AS DATETIME2(0));
+
     BEGIN TRAN;
 
       INSERT INTO aportes_metas (meta_id, cuenta_id, monto_aporte, fecha_aporte, notas)
-      VALUES (@MetaId, @CuentaId, @MontoAporte, CAST(GETDATE() AS DATETIME2(0)), @Notas);
+      VALUES (@MetaId, @CuentaId, @MontoAporte, @FechaAporte, @Notas);
 
       UPDATE metas
         SET monto_actual = monto_actual + @MontoAporte,
-            fecha_actualizacion = CAST(GETDATE() AS DATETIME2(0))
+            fecha_actualizacion = CAST(@FechaHoraLocal AS DATETIME2(0))
       WHERE id = @MetaId AND usuario_id = @UsuarioId;
 
     COMMIT TRAN;

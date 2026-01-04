@@ -8,15 +8,20 @@ import {
   Delete, 
   ParseIntPipe,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { CuentasService } from './cuentas.service';
 import { CreateCuentaDto } from './dto/create-cuenta.dto';
 import { UpdateCuentaDto } from './dto/update-cuenta.dto';
 import { CuentaResponseDto } from './dto/cuenta-response.dto';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { CurrentUserId } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Cuentas')
 @Controller('cuentas')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth()
 export class CuentasController {
   constructor(private readonly cuentasService: CuentasService) {}
 
@@ -34,13 +39,10 @@ export class CuentasController {
     status: 409, 
     description: 'Ya existe una cuenta con este nombre' 
   })
-  @ApiBearerAuth()
   async create(
     @Body() createCuentaDto: CreateCuentaDto,
-    // TODO: Extraer usuarioId del JWT cuando implementemos el guard
+    @CurrentUserId() usuarioId: number,
   ): Promise<CuentaResponseDto> {
-    // TODO: Reemplazar 1 con el usuarioId del JWT
-    const usuarioId = 1;
     return await this.cuentasService.create(usuarioId, createCuentaDto);
   }
 
@@ -54,13 +56,10 @@ export class CuentasController {
     description: 'Lista de cuentas con saldo actual',
     type: [CuentaResponseDto] 
   })
-  @ApiBearerAuth()
   async findAll(
-    @Query('tipo') tipo?: string
+    @CurrentUserId() usuarioId: number,
+    @Query('tipo') tipo?: string,
   ): Promise<CuentaResponseDto[]> {
-    // TODO: Reemplazar 1 con el usuarioId del JWT
-    const usuarioId = 1;
-    
     if (tipo) {
       return await this.cuentasService.findByType(usuarioId, tipo);
     }
@@ -77,10 +76,9 @@ export class CuentasController {
     status: 200, 
     description: 'Resumen de uso de cuentas' 
   })
-  @ApiBearerAuth()
-  async getSummary(): Promise<any[]> {
-    // TODO: Reemplazar 1 con el usuarioId del JWT
-    const usuarioId = 1;
+  async getSummary(
+    @CurrentUserId() usuarioId: number,
+  ): Promise<any[]> {
     return await this.cuentasService.getSummary(usuarioId);
   }
 
@@ -98,12 +96,10 @@ export class CuentasController {
     status: 404, 
     description: 'Cuenta no encontrada' 
   })
-  @ApiBearerAuth()
   async findOne(
-    @Param('id', ParseIntPipe) id: number
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUserId() usuarioId: number,
   ): Promise<CuentaResponseDto> {
-    // TODO: Reemplazar 1 con el usuarioId del JWT
-    const usuarioId = 1;
     return await this.cuentasService.findOne(id, usuarioId);
   }
 
@@ -121,13 +117,11 @@ export class CuentasController {
     status: 404, 
     description: 'Cuenta no encontrada' 
   })
-  @ApiBearerAuth()
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() updateCuentaDto: UpdateCuentaDto
+    @Body() updateCuentaDto: UpdateCuentaDto,
+    @CurrentUserId() usuarioId: number,
   ): Promise<CuentaResponseDto> {
-    // TODO: Reemplazar 1 con el usuarioId del JWT
-    const usuarioId = 1;
     return await this.cuentasService.update(id, usuarioId, updateCuentaDto);
   }
 
@@ -148,12 +142,10 @@ export class CuentasController {
     status: 409, 
     description: 'No se puede eliminar porque tiene transacciones o saldo' 
   })
-  @ApiBearerAuth()
   async remove(
-    @Param('id', ParseIntPipe) id: number
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUserId() usuarioId: number,
   ): Promise<{ message: string }> {
-    // TODO: Reemplazar 1 con el usuarioId del JWT
-    const usuarioId = 1;
     return await this.cuentasService.remove(id, usuarioId);
   }
 }

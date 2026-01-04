@@ -4,6 +4,9 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
+  // Configurar la zona horaria a America/Bogota (UTC-5)
+  process.env.TZ = 'America/Bogota';
+
   const app = await NestFactory.create(AppModule);
 
   // Habilitar CORS para Flutter

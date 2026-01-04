@@ -35,6 +35,10 @@ BEGIN
         RETURN;
     END
     
+    -- Convertir a zona horaria America/Bogota (UTC-5)
+    DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
+    DECLARE @FechaCreacion DATETIME2(0) = CAST(@FechaHoraLocal AS DATETIME2(0));
+
     -- Insertar la nueva categoría
     INSERT INTO categorias (
         usuario_id,
@@ -52,7 +56,7 @@ BEGIN
         @Color,
         @Tipo,
         1,
-        GETDATE()
+        @FechaCreacion
     );
     
     SET @CategoriaId = SCOPE_IDENTITY();

@@ -38,6 +38,10 @@ BEGIN
         RETURN;
     END
     
+    -- Convertir a zona horaria America/Bogota (UTC-5)
+    DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
+    DECLARE @FechaCreacion DATETIME2(0) = CAST(@FechaHoraLocal AS DATETIME2(0));
+
     -- Insertar la nueva cuenta
     INSERT INTO cuentas (
         usuario_id,
@@ -61,7 +65,7 @@ BEGIN
         @Icono,
         @Descripcion,
         1,
-        GETDATE()
+        @FechaCreacion
     );
     
     SET @CuentaId = SCOPE_IDENTITY();
@@ -292,40 +296,8 @@ BEGIN
         RETURN;
     END
     
-    -- Obtener saldo inicial
-    DECLARE @SaldoInicial DECIMAL(18,2);
-    SELECT @SaldoInicial = saldo_inicial FROM cuentas WHERE id = @CuentaId;
-    
-    -- Calcular movimientos
-    DECLARE @TipoIngresoId BIGINT;
-    DECLARE @TipoGastoId BIGINT;
-    DECLARE @Movimientos DECIMAL(18,2);
-    
-    SELECT @TipoIngresoId = id FROM tipos_transaccion WHERE nombre = 'INGRESO';
-    SELECT @TipoGastoId = id FROM tipos_transaccion WHERE nombre = 'GASTO';
-    
-    SELECT @Movimientos = ISNULL(
-        SUM(CASE 
-            WHEN tipo_transaccion_id = @TipoIngresoId THEN monto
-            WHEN tipo_transaccion_id = @TipoGastoId THEN -monto
-            ELSE 0
-        END),
-        0
-    )
-    FROM transacciones
-    WHERE cuenta_id = @CuentaId 
-        AND usuario_id = @UsuarioId
-        AND activa = 1;
-    
-    DECLARE @SaldoActual DECIMAL(18,2) = @SaldoInicial + ISNULL(@Movimientos, 0);
-    
-    IF @SaldoActual != 0
-    BEGIN
-        RAISERROR('No se puede eliminar la cuenta porque tiene saldo', 16, 1);
-        RETURN;
-    END
-    
     -- Eliminación física de la base de datos
+    -- Solo validamos transacciones, el saldo no impide la eliminación
     DELETE FROM cuentas
     WHERE id = @CuentaId;
     

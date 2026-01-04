@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, ConflictException, Inject, Logger } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, Inject, Logger, NotFoundException } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/typeorm';
 import { Connection } from 'typeorm';
 import * as bcrypt from 'bcrypt';
@@ -6,6 +6,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @Injectable()
 export class AuthService {
@@ -37,11 +38,14 @@ export class AuthService {
       const saltRounds = parseInt(this.configService.get<string>('BCRYPT_ROUNDS') || '10');
       const passwordHash = await bcrypt.hash(registerDto.password, saltRounds);
 
+      // Obtener la fecha actual en UTC para consistencia
+      const now = new Date();
+
       // Insertar el nuevo usuario usando parámetros posicionales
       const insertQuery = `
         INSERT INTO usuarios (nombre, email, password_hash, telefono, fecha_nacimiento, moneda_predeterminada, activo, fecha_creacion, fecha_actualizacion)
         OUTPUT INSERTED.id, INSERTED.nombre, INSERTED.email, INSERTED.telefono, INSERTED.moneda_predeterminada
-        VALUES (@0, @1, @2, @3, @4, @5, 1, GETDATE(), GETDATE())
+        VALUES (@0, @1, @2, @3, @4, @5, 1, @6, @6)
       `;
 
       const result = await this.connection.manager.query(insertQuery, [
@@ -51,6 +55,7 @@ export class AuthService {
         registerDto.telefono || null,
         registerDto.fechaNacimiento || null,
         registerDto.monedaPredeterminada || 'COP',
+        now,
       ]);
 
       const usuario = result[0];
@@ -144,6 +149,97 @@ export class AuthService {
       return payload;
     } catch (error) {
       return null;
+    }
+  }
+
+  /**
+   * Obtiene el perfil completo del usuario
+   */
+  async getProfile(usuarioId: number) {
+    try {
+      const result = await this.connection.manager.query(
+        'SELECT id, nombre, email, telefono, fecha_nacimiento, moneda_predeterminada FROM usuarios WHERE id = @0 AND activo = 1',
+        [usuarioId]
+      );
+
+      if (!result || result.length === 0) {
+        throw new NotFoundException('Usuario no encontrado');
+      }
+
+      const usuario = result[0];
+
+      return {
+        id: parseInt(usuario.id),
+        nombre: usuario.nombre,
+        email: usuario.email,
+        telefono: usuario.telefono,
+        fechaNacimiento: usuario.fecha_nacimiento
+          ? new Date(usuario.fecha_nacimiento).toISOString()
+          : null,
+        monedaPredeterminada: usuario.moneda_predeterminada,
+      };
+    } catch (error) {
+      this.logger.error(`Error al obtener perfil: ${error.message}`);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new Error(`Error al obtener perfil: ${error.message}`);
+    }
+  }
+
+  /**
+   * Actualiza el perfil del usuario
+   */
+  async updateProfile(usuarioId: number, updateProfileDto: UpdateProfileDto) {
+    try {
+      // Verificar que el usuario exista
+      const usuarios = await this.connection.manager.query(
+        'SELECT id FROM usuarios WHERE id = @0 AND activo = 1',
+        [usuarioId]
+      );
+
+      if (!usuarios || usuarios.length === 0) {
+        throw new NotFoundException('Usuario no encontrado');
+      }
+
+      // Actualizar el perfil usando el stored procedure
+      const updateQuery = `
+        EXEC sp_usuario_update_profile 
+          @UsuarioId = @0,
+          @Nombre = @1,
+          @Telefono = @2,
+          @FechaNacimiento = @3,
+          @MonedaPredeterminada = @4
+      `;
+
+      const result = await this.connection.manager.query(updateQuery, [
+        usuarioId,
+        updateProfileDto.nombre,
+        updateProfileDto.telefono || null,
+        updateProfileDto.fechaNacimiento || null,
+        updateProfileDto.monedaPredeterminada || null,
+      ]);
+
+      const usuario = result[0];
+
+      return {
+        id: parseInt(usuario.id),
+        nombre: usuario.nombre,
+        email: usuario.email,
+        telefono: usuario.telefono,
+        fechaNacimiento: usuario.fecha_nacimiento
+          ? new Date(usuario.fecha_nacimiento).toISOString()
+          : null,
+        monedaPredeterminada: usuario.moneda_predeterminada,
+      };
+    } catch (error) {
+      this.logger.error(`Error al actualizar perfil: ${error.message}`);
+      
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      
+      throw new Error(`Error al actualizar perfil: ${error.message}`);
     }
   }
 }

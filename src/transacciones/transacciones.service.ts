@@ -39,28 +39,47 @@ export class TransaccionesService {
         throw new BadRequestException('El monto debe ser mayor que cero');
       }
 
+      // Si se envía fechaTransaccion, usar la fecha del usuario pero con la hora actual del sistema
+      // Si no se envía, usar fecha y hora actual del sistema
       let fechaValida: Date;
       if (fechaTransaccion) {
         const str = fechaTransaccion as unknown as string;
-        // Parse local YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss
+        // Parsear la fecha enviada (solo fecha, hora será del sistema)
         const m = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
         if (m) {
           const y = Number(m[1]);
           const mo = Number(m[2]) - 1;
           const d = Number(m[3]);
-          const hh = m[4] ? Number(m[4]) : 0;
-          const mm = m[5] ? Number(m[5]) : 0;
-          const ss = m[6] ? Number(m[6]) : 0;
-          fechaValida = new Date(y, mo, d, hh, mm, ss); // Local time
+          // Usar la fecha del usuario pero con la hora actual del sistema
+          const ahora = new Date();
+          fechaValida = new Date(y, mo, d, ahora.getHours(), ahora.getMinutes(), ahora.getSeconds(), ahora.getMilliseconds());
         } else {
-          fechaValida = new Date(str);
-        }
-        if (isNaN(fechaValida.getTime())) {
-          throw new BadRequestException('La fecha de transacción no es válida');
+          // Si no se puede parsear, usar fecha y hora actual
+          fechaValida = new Date();
         }
       } else {
+        // Si no se envía fecha, usar fecha y hora actual del sistema
         fechaValida = new Date();
       }
+
+      // Preparar parámetros
+      const params = [
+        usuarioId,
+        cuentaId !== undefined && cuentaId !== null ? cuentaId : null,
+        tipoTransaccionId,
+        categoriaId !== undefined && categoriaId !== null ? categoriaId : null,
+        metodoPagoId !== undefined && metodoPagoId !== null ? metodoPagoId : null,
+        monto,
+        moneda || 'COP',
+        titulo !== undefined && titulo !== null && titulo !== '' ? titulo : null,
+        descripcion !== undefined && descripcion !== null && descripcion !== '' ? descripcion : null,
+        fechaValida,
+        archivoAdjunto !== undefined && archivoAdjunto !== null && archivoAdjunto !== '' ? archivoAdjunto : null,
+        notas !== undefined && notas !== null && notas !== '' ? notas : null,
+        repetir ? 1 : 0,
+      ];
+
+      this.logger.debug(`Creando transacción con parámetros: ${JSON.stringify(params)}`);
 
       // Insertar la transacción usando el stored procedure
       const result = await this.connection.manager.query(
@@ -78,29 +97,35 @@ export class TransaccionesService {
           @ArchivoAdjunto = @10,
           @Notas = @11,
           @Repetir = @12`,
-        [
-          usuarioId,
-          cuentaId || null,
-          tipoTransaccionId,
-          categoriaId || null,
-          metodoPagoId || null,
-          monto,
-          moneda || 'COP',
-          titulo || null,
-          descripcion || null,
-          fechaValida,
-          archivoAdjunto || null,
-          notas || null,
-          repetir ? 1 : 0,
-        ]
+        params
       );
 
+      this.logger.debug(`Resultado del stored procedure: ${JSON.stringify(result)}`);
+
+      // Validar que se retornó un resultado
+      if (!result || result.length === 0) {
+        throw new Error('No se recibió respuesta del servidor al crear la transacción');
+      }
+
+      this.logger.debug(`Mapeando transacción: ${JSON.stringify(result[0])}`);
       return this.mapToResponseDto(result[0]);
     } catch (error) {
       this.logger.error(`Error al crear transacción: ${error.message}`);
+      this.logger.error(`Stack trace: ${error.stack}`);
       
       if (error instanceof BadRequestException) {
         throw error;
+      }
+      
+      // Capturar errores de saldo insuficiente del stored procedure
+      if (error.message && error.message.includes('Saldo insuficiente')) {
+        throw new BadRequestException(error.message);
+      }
+      
+      // Capturar errores de formato numérico
+      if (error.message && error.message.includes('Invalid radix-10 number')) {
+        this.logger.error('Error de formato numérico - posible problema con valores NULL');
+        throw new Error('Error al procesar la respuesta del servidor. Por favor, intente nuevamente.');
       }
       
       throw new Error(`Error al crear transacción: ${error.message}`);
@@ -237,7 +262,21 @@ export class TransaccionesService {
 
       if (updateTransaccionDto.fechaTransaccion !== undefined) {
         updateFields.push(`@FechaTransaccion = @${paramIndex}`);
-        params.push(updateTransaccionDto.fechaTransaccion);
+        // Parsear la fecha enviada (solo fecha, hora será del sistema)
+        const str = updateTransaccionDto.fechaTransaccion as unknown as string;
+        const m = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+        let fechaValida: Date;
+        if (m) {
+          const y = Number(m[1]);
+          const mo = Number(m[2]) - 1;
+          const d = Number(m[3]);
+          // Usar la fecha del usuario pero con la hora actual del sistema
+          const ahora = new Date();
+          fechaValida = new Date(y, mo, d, ahora.getHours(), ahora.getMinutes(), ahora.getSeconds(), ahora.getMilliseconds());
+        } else {
+          fechaValida = new Date(updateTransaccionDto.fechaTransaccion);
+        }
+        params.push(fechaValida);
         paramIndex++;
       } else {
         updateFields.push(`@FechaTransaccion = NULL`);
@@ -500,32 +539,113 @@ export class TransaccionesService {
 
   /**
    * Mapea los datos de la transacción a DTO de respuesta
+   * Convierte las fechas a strings en formato local para evitar problemas de zona horaria
    */
   private mapToResponseDto(transaccion: any): TransaccionResponseDto {
-    return {
-      id: parseInt(transaccion.id),
-      usuario_id: parseInt(transaccion.usuario_id),
-      cuenta_id: transaccion.cuenta_id ? parseInt(transaccion.cuenta_id) : undefined,
-      cuenta_nombre: transaccion.cuenta_nombre,
-      tipo_transaccion_id: parseInt(transaccion.tipo_transaccion_id),
-      tipo_nombre: transaccion.tipo_nombre,
-      categoria_id: transaccion.categoria_id ? parseInt(transaccion.categoria_id) : undefined,
-      categoria_nombre: transaccion.categoria_nombre,
-      categoria_color: transaccion.categoria_color,
-      categoria_icono: transaccion.categoria_icono,
-      metodo_pago_id: transaccion.metodo_pago_id ? parseInt(transaccion.metodo_pago_id) : undefined,
-      metodo_pago_nombre: transaccion.metodo_pago_nombre,
-      monto: parseFloat(transaccion.monto) || 0,
-      moneda: transaccion.moneda,
-      titulo: transaccion.titulo,
-      descripcion: transaccion.descripcion,
-      fecha_transaccion: transaccion.fecha_transaccion,
-      archivo_adjunto: transaccion.archivo_adjunto,
-      notas: transaccion.notas,
-      repetir: Boolean(transaccion.repetir),
-      activa: Boolean(transaccion.activa),
-      fecha_creacion: transaccion.fecha_creacion,
+    if (!transaccion) {
+      throw new Error('Transacción es null o undefined');
+    }
+
+    // Función para convertir fecha a string en formato local (sin Z, sin conversión UTC)
+    const formatDateAsLocalString = (date: any): string => {
+      if (!date || date === null || date === 'null') return null as any;
+      
+      let dateObj: Date;
+      
+      // Si ya es string de SQL Server, parsearlo como local
+      if (typeof date === 'string') {
+        const str = date.toString().trim();
+        if (str === 'null' || str === '') return null as any;
+        // Formato SQL Server: "2026-01-03 20:57:23.0533333"
+        if (str.includes(' ')) {
+          const [datePart, timePart] = str.split(' ');
+          const [year, month, day] = datePart.split('-').map(Number);
+          const [hour, minute, secondPart] = timePart.split(':');
+          const [second, msPart] = secondPart.split('.');
+          const ms = msPart ? parseInt(msPart.substring(0, 3).padEnd(3, '0')) : 0;
+          
+          // Crear Date como hora local
+          dateObj = new Date(year, month - 1, day, parseInt(hour), parseInt(minute), parseInt(second), ms);
+        } else {
+          // Si es ISO string sin Z, parsear como local
+          dateObj = new Date(str);
+        }
+      } else if (date instanceof Date) {
+        dateObj = date;
+      } else {
+        return null as any;
+      }
+      
+      // Formatear como string local sin Z (formato: YYYY-MM-DDTHH:mm:ss)
+      const year = dateObj.getFullYear();
+      const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const day = String(dateObj.getDate()).padStart(2, '0');
+      const hours = String(dateObj.getHours()).padStart(2, '0');
+      const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+      const seconds = String(dateObj.getSeconds()).padStart(2, '0');
+      
+      return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
     };
+
+    // Función helper para parsear enteros de forma segura
+    const safeParseInt = (value: any): number => {
+      if (value === null || value === undefined || value === 'null' || value === '' || value === 'NULL') {
+        throw new Error(`Valor inválido para parseInt: ${value}`);
+      }
+      if (typeof value === 'number') return value;
+      const parsed = parseInt(String(value), 10);
+      if (isNaN(parsed)) {
+        throw new Error(`No se pudo parsear como entero: ${value}`);
+      }
+      return parsed;
+    };
+
+    // Función helper para parsear decimales de forma segura
+    const safeParseFloat = (value: any): number => {
+      if (value === null || value === undefined || value === 'null' || value === '' || value === 'NULL') return 0;
+      if (typeof value === 'number') return value;
+      const parsed = parseFloat(String(value));
+      return isNaN(parsed) ? 0 : parsed;
+    };
+
+    // Función helper para valores opcionales
+    const safeOptionalInt = (value: any): number | undefined => {
+      if (value === null || value === undefined || value === 'null' || value === '' || value === 'NULL') return undefined;
+      if (typeof value === 'number') return value;
+      const parsed = parseInt(String(value), 10);
+      return isNaN(parsed) ? undefined : parsed;
+    };
+
+    try {
+      return {
+        id: safeParseInt(transaccion.id),
+        usuario_id: safeParseInt(transaccion.usuario_id),
+        cuenta_id: safeOptionalInt(transaccion.cuenta_id),
+        cuenta_nombre: transaccion.cuenta_nombre || undefined,
+        tipo_transaccion_id: safeParseInt(transaccion.tipo_transaccion_id),
+        tipo_nombre: transaccion.tipo_nombre || '',
+        categoria_id: safeOptionalInt(transaccion.categoria_id),
+        categoria_nombre: transaccion.categoria_nombre || undefined,
+        categoria_color: transaccion.categoria_color || undefined,
+        categoria_icono: transaccion.categoria_icono || undefined,
+        metodo_pago_id: safeOptionalInt(transaccion.metodo_pago_id),
+        metodo_pago_nombre: transaccion.metodo_pago_nombre || undefined,
+        monto: safeParseFloat(transaccion.monto),
+        moneda: transaccion.moneda || 'COP',
+        titulo: transaccion.titulo || undefined,
+        descripcion: transaccion.descripcion || undefined,
+        fecha_transaccion: formatDateAsLocalString(transaccion.fecha_transaccion),
+        archivo_adjunto: transaccion.archivo_adjunto || undefined,
+        notas: transaccion.notas || undefined,
+        repetir: Boolean(transaccion.repetir),
+        activa: Boolean(transaccion.activa),
+        fecha_creacion: formatDateAsLocalString(transaccion.fecha_creacion),
+      };
+    } catch (error) {
+      this.logger.error(`Error al mapear transacción: ${error.message}`);
+      this.logger.error(`Datos de transacción: ${JSON.stringify(transaccion)}`);
+      throw new Error(`Error al procesar la transacción: ${error.message}`);
+    }
   }
 }
 

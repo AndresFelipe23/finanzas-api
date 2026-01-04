@@ -129,9 +129,12 @@ BEGIN
     WHERE (@CategoriaId IS NULL OR categoria_id = @CategoriaId)
       AND (@CuentaId IS NULL OR cuenta_id = @CuentaId);
 
+    -- Convertir a zona horaria America/Bogota (UTC-5)
+    DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
+
     UPDATE dbo.presupuestos
     SET monto_gastado = @Gastado,
-        fecha_actualizacion = CAST(GETDATE() AS DATETIME2(0))
+        fecha_actualizacion = CAST(@FechaHoraLocal AS DATETIME2(0))
     WHERE id=@Id AND usuario_id=@UsuarioId;
 
     SELECT * FROM dbo.presupuestos WHERE id=@Id AND usuario_id=@UsuarioId;
@@ -163,13 +166,17 @@ BEGIN
     IF (@MontoLimite IS NULL OR @MontoLimite <= 0) RAISERROR('El monto límite debe ser mayor a 0',16,1);
     IF (@Periodo NOT IN ('SEMANAL','MENSUAL','ANUAL','PERSONALIZADO')) RAISERROR('Periodo inválido',16,1);
 
+    -- Convertir a zona horaria America/Bogota (UTC-5)
+    DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
+    DECLARE @FechaCreacion DATETIME2(0) = CAST(@FechaHoraLocal AS DATETIME2(0));
+
     -- Procesar fecha inicio: usar directamente o fecha actual
     DECLARE @Ini DATETIME2(7);
     
     IF @FechaInicio IS NOT NULL
       SET @Ini = @FechaInicio;
     ELSE
-      SET @Ini = GETDATE();
+      SET @Ini = @FechaHoraLocal;
 
     -- Calcular fecha fin según el periodo
     DECLARE @Fin DATETIME2(7);
@@ -197,7 +204,7 @@ BEGIN
     VALUES (
       @UsuarioId, @Nombre, @CategoriaId, @CuentaId, @Periodo,
       @Ini, @Fin, @MontoLimite, 0, 1, @Notas,
-      GETDATE(), GETDATE()
+      @FechaCreacion, @FechaCreacion
     );
 
     DECLARE @NewId BIGINT = SCOPE_IDENTITY();
@@ -263,9 +270,12 @@ AS
 BEGIN
   SET NOCOUNT ON;
   BEGIN TRY
+    -- Convertir a zona horaria America/Bogota (UTC-5)
+    DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
+
     UPDATE dbo.presupuestos
     SET activo = @Activo,
-        fecha_actualizacion = CAST(GETDATE() AS DATETIME2(0))
+        fecha_actualizacion = CAST(@FechaHoraLocal AS DATETIME2(0))
     WHERE id=@Id AND usuario_id=@UsuarioId;
 
     SELECT * FROM dbo.presupuestos WHERE id=@Id AND usuario_id=@UsuarioId;
@@ -340,14 +350,34 @@ BEGIN
   SET NOCOUNT ON;
   BEGIN TRY
     DECLARE @Hoy DATETIME2(0) = CAST(ISNULL(@Fecha, GETDATE()) AS DATETIME2(0));
+    
+    -- Si no hay presupuestos activos en el período, retornar ceros
+    IF NOT EXISTS (
+      SELECT 1
+      FROM dbo.presupuestos
+      WHERE usuario_id = @UsuarioId
+        AND activo = 1
+        AND @Hoy BETWEEN fecha_inicio AND DATEADD(SECOND,86399,fecha_fin)
+    )
+    BEGIN
+      SELECT 
+        0 AS total_presupuestos,
+        0 AS sobrepasados,
+        0 AS dentro_presupuesto,
+        0 AS suma_limites,
+        0 AS suma_gastado;
+      RETURN;
+    END
+    
+    -- Si hay presupuestos, calcular el resumen
     SELECT 
       COUNT(1) AS total_presupuestos,
-      SUM(CASE WHEN monto_gastado >= monto_limite THEN 1 ELSE 0 END) AS sobrepasados,
-      SUM(CASE WHEN monto_gastado < monto_limite THEN 1 ELSE 0 END) AS dentro_presupuesto,
-      SUM(monto_limite) AS suma_limites,
-      SUM(monto_gastado) AS suma_gastado
+      ISNULL(SUM(CASE WHEN monto_gastado >= monto_limite THEN 1 ELSE 0 END), 0) AS sobrepasados,
+      ISNULL(SUM(CASE WHEN monto_gastado < monto_limite THEN 1 ELSE 0 END), 0) AS dentro_presupuesto,
+      ISNULL(SUM(monto_limite), 0) AS suma_limites,
+      ISNULL(SUM(monto_gastado), 0) AS suma_gastado
     FROM dbo.presupuestos
-    WHERE usuario_id=@UsuarioId
+    WHERE usuario_id = @UsuarioId
       AND activo = 1
       AND @Hoy BETWEEN fecha_inicio AND DATEADD(SECOND,86399,fecha_fin);
   END TRY

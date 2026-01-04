@@ -20,13 +20,17 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
+    -- Convertir a zona horaria America/Bogota (UTC-5)
+    DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
+    DECLARE @FechaCreacion DATETIME2(0) = CAST(@FechaHoraLocal AS DATETIME2(0));
+
     INSERT INTO pagos_recurrentes (
         usuario_id, categoria_id, cuenta_id, metodo_pago_id, monto, descripcion,
         frecuencia, dia_vencimiento, dia_semana, fecha_inicio, fecha_fin, activo, fecha_creacion
     )
     VALUES (
         @UsuarioId, @CategoriaId, @CuentaId, @MetodoPagoId, @Monto, @Descripcion,
-        @Frecuencia, @DiaVencimiento, @DiaSemana, @FechaInicio, @FechaFin, 1, GETDATE()
+        @Frecuencia, @DiaVencimiento, @DiaSemana, @FechaInicio, @FechaFin, 1, @FechaCreacion
     );
 
     SELECT *

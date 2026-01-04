@@ -15,9 +15,13 @@ import { CategoriasService } from './categorias.service';
 import { CreateCategoriaDto } from './dto/create-categoria.dto';
 import { UpdateCategoriaDto } from './dto/update-categoria.dto';
 import { CategoriaResponseDto } from './dto/categoria-response.dto';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { CurrentUserId } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Categorías')
 @Controller('categorias')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth()
 export class CategoriasController {
   constructor(private readonly categoriasService: CategoriasService) {}
 
@@ -35,13 +39,10 @@ export class CategoriasController {
     status: 409, 
     description: 'Ya existe una categoría con este nombre' 
   })
-  @ApiBearerAuth()
   async create(
     @Body() createCategoriaDto: CreateCategoriaDto,
-    // TODO: Extraer usuarioId del JWT cuando implementemos el guard
+    @CurrentUserId() usuarioId: number,
   ): Promise<CategoriaResponseDto> {
-    // TODO: Reemplazar 1 con el usuarioId del JWT
-    const usuarioId = 1;
     return await this.categoriasService.create(usuarioId, createCategoriaDto);
   }
 
@@ -55,13 +56,10 @@ export class CategoriasController {
     description: 'Lista de categorías',
     type: [CategoriaResponseDto] 
   })
-  @ApiBearerAuth()
   async findAll(
-    @Query('tipo') tipo?: 'INGRESO' | 'GASTO' | 'AMBOS'
+    @CurrentUserId() usuarioId: number,
+    @Query('tipo') tipo?: 'INGRESO' | 'GASTO' | 'AMBOS',
   ): Promise<CategoriaResponseDto[]> {
-    // TODO: Reemplazar 1 con el usuarioId del JWT
-    const usuarioId = 1;
-    
     if (tipo) {
       return await this.categoriasService.findByType(usuarioId, tipo);
     }
@@ -78,10 +76,9 @@ export class CategoriasController {
     status: 200, 
     description: 'Resumen de uso de categorías' 
   })
-  @ApiBearerAuth()
-  async getSummary(): Promise<any[]> {
-    // TODO: Reemplazar 1 con el usuarioId del JWT
-    const usuarioId = 1;
+  async getSummary(
+    @CurrentUserId() usuarioId: number,
+  ): Promise<any[]> {
     return await this.categoriasService.getSummary(usuarioId);
   }
 
@@ -98,10 +95,9 @@ export class CategoriasController {
     status: 409, 
     description: 'El usuario ya tiene categorías personalizadas' 
   })
-  @ApiBearerAuth()
-  async createDefaults(): Promise<{ message: string }> {
-    // TODO: Reemplazar 1 con el usuarioId del JWT
-    const usuarioId = 1;
+  async createDefaults(
+    @CurrentUserId() usuarioId: number,
+  ): Promise<{ message: string }> {
     return await this.categoriasService.insertDefaultCategories(usuarioId);
   }
 
@@ -119,12 +115,10 @@ export class CategoriasController {
     status: 404, 
     description: 'Categoría no encontrada' 
   })
-  @ApiBearerAuth()
   async findOne(
-    @Param('id', ParseIntPipe) id: number
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUserId() usuarioId: number,
   ): Promise<CategoriaResponseDto> {
-    // TODO: Reemplazar 1 con el usuarioId del JWT
-    const usuarioId = 1;
     return await this.categoriasService.findOne(id, usuarioId);
   }
 
@@ -142,13 +136,11 @@ export class CategoriasController {
     status: 404, 
     description: 'Categoría no encontrada' 
   })
-  @ApiBearerAuth()
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() updateCategoriaDto: UpdateCategoriaDto
+    @Body() updateCategoriaDto: UpdateCategoriaDto,
+    @CurrentUserId() usuarioId: number,
   ): Promise<CategoriaResponseDto> {
-    // TODO: Reemplazar 1 con el usuarioId del JWT
-    const usuarioId = 1;
     return await this.categoriasService.update(id, usuarioId, updateCategoriaDto);
   }
 
@@ -169,12 +161,10 @@ export class CategoriasController {
     status: 409, 
     description: 'No se puede eliminar porque tiene transacciones asociadas' 
   })
-  @ApiBearerAuth()
   async remove(
-    @Param('id', ParseIntPipe) id: number
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUserId() usuarioId: number,
   ): Promise<{ message: string }> {
-    // TODO: Reemplazar 1 con el usuarioId del JWT
-    const usuarioId = 1;
     return await this.categoriasService.remove(id, usuarioId);
   }
 }

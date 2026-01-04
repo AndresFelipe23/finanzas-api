@@ -271,45 +271,35 @@ export class CuentasService {
   }
 
   /**
-   * Elimina una cuenta (soft delete)
+   * Elimina una cuenta físicamente usando el stored procedure
    */
   async remove(cuentaId: number, usuarioId: number): Promise<{ message: string }> {
     try {
-      // Verificar que la cuenta existe y pertenece al usuario
-      await this.findOne(cuentaId, usuarioId);
-
-      // Verificar si la cuenta tiene transacciones
-      const transacciones = await this.connection.manager.query(
-        'SELECT COUNT(*) as count FROM transacciones WHERE cuenta_id = @0 AND activa = 1',
-        [cuentaId]
+      // Usar el stored procedure que tiene toda la lógica de validación
+      const result = await this.connection.manager.query(
+        `EXEC sp_cuenta_delete @CuentaId = @0, @UsuarioId = @1`,
+        [cuentaId, usuarioId]
       );
 
-      const count = transacciones[0].count;
-      
-      if (count > 0) {
-        throw new ConflictException(
-          `No se puede eliminar la cuenta porque tiene ${count} transacción(es) asociada(s)`
-        );
+      // El stored procedure retorna 1 si se eliminó exitosamente
+      if (result && result.length > 0 && result[0].eliminado === 1) {
+        return { message: 'Cuenta eliminada exitosamente' };
       }
 
-      // Calcular el saldo actual
-      const cuenta = await this.findOne(cuentaId, usuarioId);
-      
-      if (cuenta.saldo_actual && cuenta.saldo_actual !== 0) {
-        throw new ConflictException(
-          'No se puede eliminar la cuenta porque tiene saldo'
-        );
-      }
-
-      // Realizar eliminación física
-      await this.connection.manager.query(
-        'DELETE FROM cuentas WHERE id = @0',
-        [cuentaId]
-      );
-
-      return { message: 'Cuenta eliminada exitosamente' };
+      throw new Error('No se pudo eliminar la cuenta');
     } catch (error) {
       this.logger.error(`Error al eliminar cuenta: ${error.message}`);
+      
+      // Capturar errores del stored procedure
+      if (error.message && (
+        error.message.includes('No se puede eliminar') ||
+        error.message.includes('tiene transacciones') ||
+        error.message.includes('tiene saldo') ||
+        error.message.includes('no existe') ||
+        error.message.includes('no pertenece')
+      )) {
+        throw new ConflictException(error.message);
+      }
       
       if (error instanceof NotFoundException || error instanceof ConflictException) {
         throw error;
