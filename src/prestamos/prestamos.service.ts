@@ -68,7 +68,7 @@ export class PrestamosService {
         'fechaFin' in dto ? dto.fechaFin ?? null : null,
         'cuentaId' in dto ? dto.cuentaId ?? null : null,
         'notas' in dto ? dto.notas ?? null : null,
-        'activa' in dto ? (dto as any).activa ?? null : null,
+        dto.activa !== undefined ? (dto.activa ? 1 : 0) : null,
       ],
     );
     return this.ensureArray(result)[0];
