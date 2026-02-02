@@ -231,7 +231,8 @@ BEGIN
     
     BEGIN TRY
         -- Validar que la transacción existe y pertenece al usuario
-        IF NOT EXISTS (SELECT 1 FROM transacciones WHERE id = @Id AND usuario_id = @UsuarioId AND activa = 1)
+        -- Removido el filtro AND activa = 1 para permitir restaurar transacciones eliminadas
+        IF NOT EXISTS (SELECT 1 FROM transacciones WHERE id = @Id AND usuario_id = @UsuarioId)
         BEGIN
             RAISERROR('Transacción no encontrada o no pertenece al usuario', 16, 1);
             RETURN;
@@ -426,6 +427,86 @@ BEGIN
         -- Soft delete
         UPDATE transacciones
         SET activa = 0
+        WHERE id = @Id
+        
+        -- Recalcular presupuestos afectados si era un GASTO
+        DECLARE @TipoGastoId BIGINT;
+        SELECT @TipoGastoId = id FROM tipos_transaccion WHERE nombre = 'GASTO' AND activo = 1;
+        
+        IF @TipoTransaccionId = @TipoGastoId
+        BEGIN
+            -- Buscar presupuestos que podrían verse afectados por esta transacción
+            DECLARE @PresupuestoId BIGINT;
+            DECLARE presupuestos_cursor CURSOR FOR
+                SELECT id
+                FROM presupuestos
+                WHERE usuario_id = @UsuarioId
+                  AND activo = 1
+                  AND @FechaTransaccion >= fecha_inicio
+                  AND @FechaTransaccion <= DATEADD(SECOND, 86399, fecha_fin)
+                  AND (categoria_id IS NULL OR categoria_id = @CategoriaId)
+                  AND (cuenta_id IS NULL OR cuenta_id = @CuentaId);
+            
+            OPEN presupuestos_cursor;
+            FETCH NEXT FROM presupuestos_cursor INTO @PresupuestoId;
+            
+            WHILE @@FETCH_STATUS = 0
+            BEGIN
+                BEGIN TRY
+                    EXEC sp_presupuesto_recalc_gasto @Id = @PresupuestoId, @UsuarioId = @UsuarioId;
+                END TRY
+                BEGIN CATCH
+                    -- Continuar con el siguiente presupuesto si hay error
+                END CATCH
+                
+                FETCH NEXT FROM presupuestos_cursor INTO @PresupuestoId;
+            END
+            
+            CLOSE presupuestos_cursor;
+            DEALLOCATE presupuestos_cursor;
+        END
+        
+        SELECT 1 AS success
+        
+    END TRY
+    BEGIN CATCH
+        THROW;
+    END CATCH
+END;
+GO
+
+-- SP: Eliminar transacción permanentemente (hard delete)
+CREATE OR ALTER PROCEDURE sp_transaccion_delete_permanently
+    @Id BIGINT,
+    @UsuarioId BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    
+    BEGIN TRY
+        -- Validar que la transacción existe y pertenece al usuario
+        IF NOT EXISTS (SELECT 1 FROM transacciones WHERE id = @Id AND usuario_id = @UsuarioId)
+        BEGIN
+            RAISERROR('Transacción no encontrada o no pertenece al usuario', 16, 1);
+            RETURN;
+        END
+        
+        -- Obtener información de la transacción antes de eliminarla para recalcular presupuestos
+        DECLARE @FechaTransaccion DATETIME2(7);
+        DECLARE @CategoriaId BIGINT;
+        DECLARE @CuentaId BIGINT;
+        DECLARE @TipoTransaccionId BIGINT;
+        
+        SELECT 
+            @FechaTransaccion = fecha_transaccion,
+            @CategoriaId = categoria_id,
+            @CuentaId = cuenta_id,
+            @TipoTransaccionId = tipo_transaccion_id
+        FROM transacciones
+        WHERE id = @Id;
+        
+        -- Eliminar permanentemente de la base de datos
+        DELETE FROM transacciones
         WHERE id = @Id
         
         -- Recalcular presupuestos afectados si era un GASTO
@@ -710,7 +791,8 @@ BEGIN
     LEFT JOIN tipos_transaccion tt ON t.tipo_transaccion_id = tt.id
     LEFT JOIN categorias c ON t.categoria_id = c.id
     LEFT JOIN metodos_pago mp ON t.metodo_pago_id = mp.id
-    WHERE t.id = @Id AND t.usuario_id = @UsuarioId AND t.activa = 1
+    WHERE t.id = @Id AND t.usuario_id = @UsuarioId
+    -- Removido el filtro AND t.activa = 1 para permitir obtener transacciones eliminadas
 END;
 GO
 
@@ -752,7 +834,8 @@ BEGIN
     LEFT JOIN metodos_pago mp ON t.metodo_pago_id = mp.id
     LEFT JOIN cuentas ct ON t.cuenta_id = ct.id
     WHERE t.usuario_id = @UsuarioId 
-        AND t.activa = 1
+        -- Removido el filtro AND t.activa = 1 para permitir obtener todas las transacciones
+        -- El frontend filtrará según necesite (activas o eliminadas)
         AND (@FechaInicio IS NULL OR t.fecha_transaccion >= @FechaInicio)
         AND (@FechaFin IS NULL OR t.fecha_transaccion <= @FechaFin)
     ORDER BY t.fecha_transaccion DESC

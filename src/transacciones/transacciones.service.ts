@@ -197,8 +197,16 @@ export class TransaccionesService {
     updateTransaccionDto: UpdateTransaccionDto
   ): Promise<TransaccionResponseDto> {
     try {
-      // Verificar que la transacción existe
-      await this.findOne(transaccionId, usuarioId);
+      // Verificar que la transacción existe (sin validar si está activa)
+      // Esto permite restaurar transacciones eliminadas
+      const exists = await this.connection.manager.query(
+        `SELECT 1 FROM transacciones WHERE id = @0 AND usuario_id = @1`,
+        [transaccionId, usuarioId]
+      );
+      
+      if (!exists || exists.length === 0) {
+        throw new NotFoundException('Transacción no encontrada');
+      }
 
       const updateFields: string[] = [];
       const params: any[] = [];
@@ -341,8 +349,15 @@ export class TransaccionesService {
    */
   async remove(transaccionId: number, usuarioId: number): Promise<{ message: string }> {
     try {
-      // Verificar que la transacción existe
-      await this.findOne(transaccionId, usuarioId);
+      // Verificar que la transacción existe (sin validar si está activa)
+      const exists = await this.connection.manager.query(
+        `SELECT 1 FROM transacciones WHERE id = @0 AND usuario_id = @1`,
+        [transaccionId, usuarioId]
+      );
+      
+      if (!exists || exists.length === 0) {
+        throw new NotFoundException('Transacción no encontrada');
+      }
 
       await this.connection.manager.query(
         `EXEC sp_transaccion_delete
@@ -360,6 +375,40 @@ export class TransaccionesService {
       }
       
       throw new Error(`Error al eliminar transacción: ${error.message}`);
+    }
+  }
+
+  /**
+   * Elimina una transacción permanentemente (hard delete)
+   */
+  async removePermanently(transaccionId: number, usuarioId: number): Promise<{ message: string }> {
+    try {
+      // Verificar que la transacción existe (sin validar si está activa)
+      const exists = await this.connection.manager.query(
+        `SELECT 1 FROM transacciones WHERE id = @0 AND usuario_id = @1`,
+        [transaccionId, usuarioId]
+      );
+      
+      if (!exists || exists.length === 0) {
+        throw new NotFoundException('Transacción no encontrada');
+      }
+
+      await this.connection.manager.query(
+        `EXEC sp_transaccion_delete_permanently
+          @Id = @0,
+          @UsuarioId = @1`,
+        [transaccionId, usuarioId]
+      );
+
+      return { message: 'Transacción eliminada permanentemente' };
+    } catch (error) {
+      this.logger.error(`Error al eliminar transacción permanentemente: ${error.message}`);
+      
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      
+      throw new Error(`Error al eliminar transacción permanentemente: ${error.message}`);
     }
   }
 

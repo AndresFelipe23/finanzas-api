@@ -225,6 +225,7 @@ export class TransaccionesController {
     summary: 'Eliminar transacción', 
     description: 'Elimina una transacción (soft delete)' 
   })
+  @ApiQuery({ name: 'permanent', required: false, type: Boolean, description: 'Si es true, elimina permanentemente' })
   @ApiResponse({ 
     status: 200, 
     description: 'Transacción eliminada exitosamente' 
@@ -236,8 +237,15 @@ export class TransaccionesController {
   async remove(
     @Param('id', ParseIntPipe) id: number,
     @CurrentUserId() usuarioId: number,
+    @Query('permanent') permanent?: string,
   ): Promise<{ message: string }> {
-    return await this.transaccionesService.remove(id, usuarioId);
+    const isPermanent = permanent === 'true' || permanent === '1';
+    
+    if (isPermanent) {
+      return await this.transaccionesService.removePermanently(id, usuarioId);
+    } else {
+      return await this.transaccionesService.remove(id, usuarioId);
+    }
   }
 }
 
