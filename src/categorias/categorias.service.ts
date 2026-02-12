@@ -117,42 +117,36 @@ export class CategoriasService {
    */
   async findOne(categoriaId: number, usuarioId: number): Promise<CategoriaResponseDto> {
     try {
-      const query = `
-        SELECT id, usuario_id, nombre, icono, color, tipo, activo, fecha_creacion
-        FROM categorias
-        WHERE id = @0 AND activo = 1
-      `;
+      const catId = Number(categoriaId);
+      const usrId = Number(usuarioId);
+      if (isNaN(catId) || isNaN(usrId)) {
+        throw new NotFoundException('Categoría no encontrada');
+      }
 
-      const result = await this.connection.manager.query(query, [categoriaId]);
+      // Query by id first, then verify ownership in code to avoid BIGINT parameter issues
+      const result = await this.connection.manager.query(
+        'SELECT id, usuario_id, nombre, icono, color, tipo, activo, fecha_creacion FROM categorias WHERE id = @0 AND activo = 1',
+        [catId]
+      );
 
       if (!result || result.length === 0) {
         throw new NotFoundException('Categoría no encontrada');
       }
 
-      const categoria = result[0];
-
-      // Verificar que la categoría pertenece al usuario
-      // NO permitir acceso a categorías del sistema (usuario_id = NULL)
-      const categoriaUsuarioId = categoria.usuario_id ? parseInt(categoria.usuario_id) : null;
-      
-      // Si es categoría del sistema, no permitir acceso
-      if (categoriaUsuarioId === null) {
-        throw new NotFoundException('Categoría no encontrada');
-      }
-      
-      // Si no pertenece al usuario, no permitir acceso
-      if (categoriaUsuarioId !== usuarioId) {
+      const cat = result[0];
+      // Verify the category belongs to the user
+      if (Number(cat.usuario_id) !== usrId) {
         throw new NotFoundException('Categoría no encontrada');
       }
 
-      return this.mapToResponseDto(categoria);
+      return this.mapToResponseDto(cat);
     } catch (error) {
       this.logger.error(`Error al obtener categoría: ${error.message}`);
-      
+
       if (error instanceof NotFoundException) {
         throw error;
       }
-      
+
       throw new Error(`Error al obtener categoría: ${error.message}`);
     }
   }
@@ -237,37 +231,63 @@ export class CategoriasService {
    */
   async remove(categoriaId: number, usuarioId: number): Promise<{ message: string }> {
     try {
-      // Verificar que la categoría existe y pertenece al usuario (no del sistema)
-      await this.findOne(categoriaId, usuarioId);
+      const catId = Number(categoriaId);
+      const usrId = Number(usuarioId);
+
+      if (isNaN(catId) || isNaN(usrId)) {
+        throw new NotFoundException('Categoría no encontrada');
+      }
+
+      // Verificar que la categoría existe (sin filtro de usuario para mejor diagnóstico)
+      const categoria = await this.connection.manager.query(
+        'SELECT id, usuario_id, activo FROM categorias WHERE id = @0',
+        [catId]
+      );
+
+      if (!categoria || categoria.length === 0) {
+        throw new NotFoundException('Categoría no encontrada');
+      }
+
+      const cat = categoria[0];
+
+      // Verificar que no sea categoría del sistema
+      if (cat.usuario_id === null || cat.usuario_id === undefined) {
+        throw new ConflictException('No se pueden eliminar categorías del sistema');
+      }
+
+      // Verificar que pertenece al usuario actual
+      if (Number(cat.usuario_id) !== usrId) {
+        throw new NotFoundException('Categoría no encontrada');
+      }
 
       // Verificar si la categoría tiene transacciones
       const transacciones = await this.connection.manager.query(
-        'SELECT COUNT(*) as count FROM transacciones WHERE categoria_id = @0 AND activa = 1',
-        [categoriaId]
+        'SELECT COUNT(*) as count FROM transacciones WHERE categoria_id = @0',
+        [catId]
       );
 
-      const count = transacciones[0].count;
-      
+      const count = Number(transacciones[0]?.count || 0);
+
       if (count > 0) {
         throw new ConflictException(
           `No se puede eliminar la categoría porque tiene ${count} transacción(es) asociada(s)`
         );
       }
 
-      // Realizar eliminación física
+      // Realizar eliminación física (con doble verificación de usuario)
       await this.connection.manager.query(
-        'DELETE FROM categorias WHERE id = @0',
-        [categoriaId]
+        'DELETE FROM categorias WHERE id = @0 AND usuario_id = @1',
+        [catId, usrId]
       );
 
       return { message: 'Categoría eliminada exitosamente' };
     } catch (error) {
       this.logger.error(`Error al eliminar categoría: ${error.message}`);
-      
+
       if (error instanceof NotFoundException || error instanceof ConflictException) {
         throw error;
       }
-      
+
       throw new Error(`Error al eliminar categoría: ${error.message}`);
     }
   }
