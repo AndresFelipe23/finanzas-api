@@ -119,9 +119,9 @@ BEGIN
         -- Calcular saldo actual
         c.saldo_inicial + ISNULL(
             SUM(CASE 
-                WHEN t.tipo_transaccion_id = @TipoIngresoId THEN t.monto
-                WHEN t.tipo_transaccion_id = @TipoGastoId THEN -t.monto
-                ELSE 0
+              WHEN t.tipo_transaccion_id = @TipoIngresoId THEN t.monto
+              WHEN t.tipo_transaccion_id = @TipoGastoId THEN -t.monto
+              ELSE 0
             END),
             0
         ) AS saldo_actual
@@ -182,9 +182,9 @@ BEGIN
         -- Calcular saldo actual
         c.saldo_inicial + ISNULL(
             SUM(CASE 
-                WHEN t.tipo_transaccion_id = @TipoIngresoId THEN t.monto
-                WHEN t.tipo_transaccion_id = @TipoGastoId THEN -t.monto
-                ELSE 0
+              WHEN t.tipo_transaccion_id = @TipoIngresoId THEN t.monto
+              WHEN t.tipo_transaccion_id = @TipoGastoId THEN -t.monto
+              ELSE 0
             END),
             0
         ) AS saldo_actual
@@ -388,7 +388,7 @@ BEGIN
                 ELSE 0
             END),
             0
-        ) AS saldo_actual,
+          ) AS saldo_actual,
         -- Total de ingresos
         ISNULL(SUM(CASE 
             WHEN t.tipo_transaccion_id = @TipoIngresoId THEN t.monto
@@ -449,9 +449,9 @@ BEGIN
         -- Calcular saldo actual
         c.saldo_inicial + ISNULL(
             SUM(CASE 
-                WHEN t.tipo_transaccion_id = @TipoIngresoId THEN t.monto
-                WHEN t.tipo_transaccion_id = @TipoGastoId THEN -t.monto
-                ELSE 0
+              WHEN t.tipo_transaccion_id = @TipoIngresoId THEN t.monto
+              WHEN t.tipo_transaccion_id = @TipoGastoId THEN -t.monto
+              ELSE 0
             END),
             0
         ) AS saldo_actual

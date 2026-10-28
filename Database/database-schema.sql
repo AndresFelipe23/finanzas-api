@@ -228,31 +228,38 @@ CREATE TABLE aportes_metas (
     monto_aporte DECIMAL(18,2) NOT NULL,
     fecha_aporte DATETIME2 DEFAULT GETDATE() NOT NULL,
     notas NVARCHAR(500) NULL,
+    transaccion_id BIGINT NULL, -- GASTO generado cuando el aporte sale de una cuenta
     CONSTRAINT FK_aportes_metas FOREIGN KEY (meta_id) REFERENCES metas(id) ON DELETE CASCADE,
-    CONSTRAINT FK_aportes_metas_cuenta FOREIGN KEY (cuenta_id) REFERENCES cuentas(id) ON DELETE NO ACTION
+    CONSTRAINT FK_aportes_metas_cuenta FOREIGN KEY (cuenta_id) REFERENCES cuentas(id) ON DELETE NO ACTION,
+    CONSTRAINT FK_aportes_metas_transaccion FOREIGN KEY (transaccion_id) REFERENCES transacciones(id) ON DELETE NO ACTION
 );
 GO
 
 -- Tabla: Préstamos
 -- Préstamos que el usuario debe o ha prestado a otros
+-- OJO: la forma vigente de esta tabla la crea y migra
+-- Database/stored-procedures/sp_prestamos.sql, que es la fuente de verdad.
+-- Los nombres de abajo reflejan esa forma, no la version original del proyecto.
 CREATE TABLE prestamos (
     id BIGINT IDENTITY(1,1) PRIMARY KEY,
     usuario_id BIGINT NOT NULL,
-    tipo NVARCHAR(20) NOT NULL CHECK (tipo IN ('DEBO', 'ME_DEBEN')),
-    nombre_deudor_prestador NVARCHAR(100) NOT NULL, -- Nombre de quien debe/presta
+    cuenta_id BIGINT NULL, -- Cuenta relacionada (opcional)
+    nombre NVARCHAR(200) NOT NULL,
+    tipo NVARCHAR(20) NOT NULL CHECK (tipo IN ('PRESTAMO', 'DEUDA')), -- PRESTAMO = me deben, DEUDA = yo debo
     monto_total DECIMAL(18,2) NOT NULL,
-    monto_pagado DECIMAL(18,2) DEFAULT 0 NOT NULL,
-    monto_pendiente AS (monto_total - monto_pagado) PERSISTED, -- Calculado automáticamente
-    fecha_prestamo DATETIME2 NOT NULL,
-    fecha_vencimiento DATETIME2 NULL,
-    descripcion NVARCHAR(1000) NULL,
-    tasa_interes DECIMAL(5,2) NULL,
-    estado NVARCHAR(20) DEFAULT 'PENDIENTE' CHECK (estado IN ('PENDIENTE', 'PAGADO', 'CANCELADO')),
-    activo BIT DEFAULT 1 NOT NULL,
-    fecha_creacion DATETIME2 DEFAULT GETDATE() NOT NULL,
-    fecha_actualizacion DATETIME2 DEFAULT GETDATE() NOT NULL,
+    monto_pagado DECIMAL(18,2) DEFAULT 0 NOT NULL, -- Derivado de pagos_prestamos por sp_prestamo_recalcular
+    saldo_pendiente DECIMAL(18,2) NOT NULL,        -- monto_total - monto_pagado
+    tasa_interes DECIMAL(9,4) NULL,                -- Anual, informativa: no afecta los montos
+    fecha_inicio DATETIME2(0) NOT NULL,
+    fecha_fin DATETIME2(0) NULL,
+    notas NVARCHAR(1000) NULL,
+    estado NVARCHAR(20) DEFAULT 'PENDIENTE', -- PENDIENTE | PAGADO | CANCELADO (lo lee la app Flutter)
+    activa BIT DEFAULT 1 NOT NULL,
+    transaccion_id BIGINT NULL, -- Movimiento generado al abrir el prestamo
+    fecha_creacion DATETIME2(0) DEFAULT CAST(GETDATE() AS DATETIME2(0)) NOT NULL,
+    fecha_actualizacion DATETIME2(0) DEFAULT CAST(GETDATE() AS DATETIME2(0)) NOT NULL,
     CONSTRAINT FK_prestamos_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
-    CONSTRAINT CHK_prestamos_monto CHECK (monto_pagado <= monto_total)
+    CONSTRAINT FK_prestamos_transaccion FOREIGN KEY (transaccion_id) REFERENCES transacciones(id) ON DELETE NO ACTION
 );
 GO
 
@@ -265,8 +272,11 @@ CREATE TABLE pagos_prestamos (
     monto_pago DECIMAL(18,2) NOT NULL,
     fecha_pago DATETIME2 DEFAULT GETDATE() NOT NULL,
     notas NVARCHAR(500) NULL,
+    transaccion_id BIGINT NULL, -- Movimiento generado cuando el pago sale/entra de una cuenta
+    fecha_creacion DATETIME2(0) DEFAULT CAST(GETDATE() AS DATETIME2(0)) NOT NULL,
     CONSTRAINT FK_pagos_prestamos FOREIGN KEY (prestamo_id) REFERENCES prestamos(id) ON DELETE CASCADE,
-    CONSTRAINT FK_pagos_prestamos_cuenta FOREIGN KEY (cuenta_id) REFERENCES cuentas(id) ON DELETE NO ACTION
+    CONSTRAINT FK_pagos_prestamos_cuenta FOREIGN KEY (cuenta_id) REFERENCES cuentas(id) ON DELETE NO ACTION,
+    CONSTRAINT FK_pagos_prestamos_transaccion FOREIGN KEY (transaccion_id) REFERENCES transacciones(id) ON DELETE NO ACTION
 );
 GO
 
@@ -326,7 +336,9 @@ INSERT INTO categorias (usuario_id, nombre, tipo) VALUES
 (NULL, 'Servicios', 'GASTO'),
 (NULL, 'Compras', 'GASTO'),
 (NULL, 'Educación', 'GASTO'),
-(NULL, 'Otro Gasto', 'GASTO');
+(NULL, 'Ahorro / Metas', 'GASTO'),
+(NULL, 'Otro Gasto', 'GASTO'),
+(NULL, 'Préstamos y deudas', 'AMBOS');
 GO
 
 -- =====================================================

@@ -11,7 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
-import { MetasService } from './metas.service';
+import { MetasService, type MetaFiltro } from './metas.service';
 import { CreateMetaDto } from './dto/create-meta.dto';
 import { UpdateMetaDto } from './dto/update-meta.dto';
 import { MetaResponseDto } from './dto/meta-response.dto';
@@ -46,7 +46,8 @@ export class MetasController {
   @Get()
   @ApiOperation({
     summary: 'Obtener metas',
-    description: 'Obtiene todas las metas del usuario autenticado con filtro opcional',
+    description:
+      'Obtiene todas las metas del usuario autenticado. Filtros: ACTIVAS, COMPLETADAS, PAUSADAS, TODAS',
   })
   @ApiResponse({
     status: 200,
@@ -55,9 +56,12 @@ export class MetasController {
   })
   async findAll(
     @CurrentUserId() usuarioId: number,
-    @Query('filtro') filtro?: 'ACTIVAS' | 'COMPLETADAS' | 'TODAS',
+    @Query('filtro') filtro?: string,
   ): Promise<MetaResponseDto[]> {
-    const filtroFinal = filtro || 'TODAS';
+    const permitidos: MetaFiltro[] = ['ACTIVAS', 'COMPLETADAS', 'PAUSADAS', 'TODAS'];
+    const filtroFinal = permitidos.includes(filtro as MetaFiltro)
+      ? (filtro as MetaFiltro)
+      : 'TODAS';
     return await this.metasService.findAll(usuarioId, filtroFinal);
   }
 
@@ -187,6 +191,28 @@ export class MetasController {
     @CurrentUserId() usuarioId: number,
   ): Promise<any[]> {
     return await this.metasService.findAportesByMeta(id, usuarioId);
+  }
+
+  @Delete(':id/aportes/:aporteId')
+  @ApiOperation({
+    summary: 'Eliminar un aporte',
+    description:
+      'Elimina un aporte, descuenta su monto de la meta y elimina el gasto asociado, devolviendo el dinero a la cuenta origen',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Meta actualizada tras revertir el aporte',
+    type: MetaResponseDto,
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Aporte no encontrado',
+  })
+  async removeAporte(
+    @Param('aporteId', ParseIntPipe) aporteId: number,
+    @CurrentUserId() usuarioId: number,
+  ): Promise<MetaResponseDto> {
+    return await this.metasService.removeAporte(aporteId, usuarioId);
   }
 }
 

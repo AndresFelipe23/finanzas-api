@@ -177,7 +177,8 @@ CREATE OR ALTER PROCEDURE sp_prestamo_create
   @FechaFin       DATETIME2 = NULL,
   @CuentaId       BIGINT = NULL,
   @Notas          NVARCHAR(1000) = NULL,
-  @NombreDeudorPrestador NVARCHAR(200) = NULL
+  @NombreDeudorPrestador NVARCHAR(200) = NULL,
+  @RegistrarMovimiento BIT = 0
 AS
 BEGIN
   SET NOCOUNT ON;
@@ -259,6 +260,53 @@ BEGIN
 
     DECLARE @NewId BIGINT = SCOPE_IDENTITY();
 
+    /*
+      Movimiento real. Pedir prestado (DEUDA) es dinero que ENTRA;
+      prestar (PRESTAMO) es dinero que SALE. Solo si el usuario lo pide
+      explicitamente: registrar una deuda vieja no debe inflar el saldo de hoy.
+    */
+    IF (@RegistrarMovimiento = 1 AND @CuentaId IS NOT NULL
+        AND COL_LENGTH('dbo.prestamos','transaccion_id') IS NOT NULL)
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM dbo.cuentas WHERE id=@CuentaId AND usuario_id=@UsuarioId AND activa=1)
+        RAISERROR('Cuenta no encontrada o inactiva', 16, 1);
+
+      DECLARE @TipoMovId BIGINT;
+      DECLARE @CategoriaId BIGINT;
+      DECLARE @MonedaCuenta NVARCHAR(10);
+
+      SELECT @TipoMovId = id FROM dbo.tipos_transaccion
+      WHERE nombre = CASE WHEN @Tipo = 'DEUDA' THEN 'INGRESO' ELSE 'GASTO' END AND activo = 1;
+
+      SELECT @CategoriaId = id FROM dbo.categorias
+      WHERE usuario_id IS NULL AND nombre = 'Préstamos y deudas';
+
+      SELECT @MonedaCuenta = moneda FROM dbo.cuentas WHERE id = @CuentaId;
+
+      IF @TipoMovId IS NULL
+        RAISERROR('No existe el tipo de transaccion requerido', 16, 1);
+
+      INSERT INTO dbo.transacciones (
+        usuario_id, cuenta_id, tipo_transaccion_id, categoria_id, metodo_pago_id,
+        monto, moneda, titulo, descripcion, fecha_transaccion,
+        archivo_adjunto, notas, repetir, activa, fecha_creacion
+      )
+      VALUES (
+        @UsuarioId, @CuentaId, @TipoMovId, @CategoriaId, NULL,
+        @MontoTotal, COALESCE(@MonedaCuenta, 'COP'),
+        CASE WHEN @Tipo = 'DEUDA' THEN 'Préstamo recibido: ' ELSE 'Préstamo entregado: ' END + @Nombre,
+        NULL, @FechaInicio,
+        NULL, @Notas, 0, 1, @FechaCreacion
+      );
+
+      DECLARE @TransaccionId BIGINT = SCOPE_IDENTITY();
+
+      UPDATE dbo.prestamos SET transaccion_id = @TransaccionId WHERE id = @NewId;
+
+      IF (@Tipo = 'PRESTAMO')
+        EXEC sp_prestamo_recalcular_presupuestos @UsuarioId = @UsuarioId, @Fecha = @FechaHoraLocal;
+    END
+
     SELECT * FROM dbo.prestamos WHERE id = @NewId AND usuario_id = @UsuarioId;
   END TRY
   BEGIN CATCH
@@ -290,6 +338,26 @@ BEGIN
 
     DECLARE @Exists INT = (SELECT COUNT(1) FROM dbo.prestamos WHERE id=@Id AND usuario_id=@UsuarioId);
     IF (@Exists = 0) RAISERROR('Préstamo no encontrado',16,1);
+
+    -- Bajar el total por debajo de lo ya pagado dejaria saldos negativos
+    IF (@MontoTotal IS NOT NULL)
+    BEGIN
+      IF (@MontoTotal <= 0)
+        RAISERROR('El monto total debe ser mayor a 0',16,1);
+
+      DECLARE @PagadoReal DECIMAL(18,2) = (
+        SELECT ISNULL(SUM(COALESCE(monto, monto_pago)), 0)
+        FROM dbo.pagos_prestamos WHERE prestamo_id = @Id
+      );
+
+      IF (@MontoTotal < @PagadoReal)
+      BEGIN
+        DECLARE @MsgMenor NVARCHAR(200) =
+          'El monto total no puede ser menor a lo ya pagado (' +
+          CONVERT(NVARCHAR(30), @PagadoReal) + ')';
+        RAISERROR(@MsgMenor,16,1);
+      END
+    END
 
     -- Convertir a zona horaria America/Bogota (UTC-5)
     DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
@@ -326,6 +394,26 @@ BEGIN
         activa = COALESCE(@Activa, activa),
         fecha_actualizacion = CAST(@FechaHoraLocal AS DATETIME2(0))
       WHERE id=@Id AND usuario_id=@UsuarioId;
+    END
+
+    -- Cambiar monto_total desfasa monto_pagado y saldo_pendiente
+    IF (@MontoTotal IS NOT NULL)
+    BEGIN
+      EXEC sp_prestamo_recalcular @PrestamoId = @Id;
+
+      -- El movimiento creado al abrir el prestamo debe seguir el nuevo monto
+      IF COL_LENGTH('dbo.prestamos','transaccion_id') IS NOT NULL
+      BEGIN
+        DECLARE @TxPrestamo BIGINT = (SELECT transaccion_id FROM dbo.prestamos WHERE id=@Id);
+        IF (@TxPrestamo IS NOT NULL)
+        BEGIN
+          UPDATE dbo.transacciones
+          SET monto = @MontoTotal
+          WHERE id = @TxPrestamo AND usuario_id = @UsuarioId;
+
+          EXEC sp_prestamo_recalcular_presupuestos @UsuarioId = @UsuarioId, @Fecha = @FechaHoraLocal;
+        END
+      END
     END
 
     SELECT * FROM dbo.prestamos WHERE id=@Id AND usuario_id=@UsuarioId;
@@ -374,7 +462,35 @@ BEGIN
     IF (@Id IS NULL OR @Id <= 0) RAISERROR('Id inválido',16,1);
     IF (@UsuarioId IS NULL OR @UsuarioId <= 0) RAISERROR('Usuario inválido',16,1);
 
-    DELETE FROM dbo.prestamos WHERE id=@Id AND usuario_id=@UsuarioId;
+    IF NOT EXISTS (SELECT 1 FROM dbo.prestamos WHERE id=@Id AND usuario_id=@UsuarioId)
+      RAISERROR('Préstamo no encontrado',16,1);
+
+    -- Recoger los movimientos generados por el prestamo y sus pagos
+    DECLARE @Transacciones TABLE (transaccion_id BIGINT);
+
+    IF COL_LENGTH('dbo.pagos_prestamos','transaccion_id') IS NOT NULL
+      INSERT INTO @Transacciones (transaccion_id)
+      SELECT transaccion_id FROM dbo.pagos_prestamos
+      WHERE prestamo_id = @Id AND transaccion_id IS NOT NULL;
+
+    IF COL_LENGTH('dbo.prestamos','transaccion_id') IS NOT NULL
+      INSERT INTO @Transacciones (transaccion_id)
+      SELECT transaccion_id FROM dbo.prestamos
+      WHERE id = @Id AND transaccion_id IS NOT NULL;
+
+    BEGIN TRAN;
+
+      DELETE FROM dbo.pagos_prestamos WHERE prestamo_id=@Id;
+      DELETE FROM dbo.prestamos WHERE id=@Id AND usuario_id=@UsuarioId;
+
+      DELETE FROM dbo.transacciones
+      WHERE usuario_id = @UsuarioId
+        AND id IN (SELECT transaccion_id FROM @Transacciones);
+
+    COMMIT TRAN;
+
+    IF EXISTS (SELECT 1 FROM @Transacciones)
+      EXEC sp_prestamo_recalcular_presupuestos @UsuarioId = @UsuarioId;
   END TRY
   BEGIN CATCH
     DECLARE @Msg NVARCHAR(4000) = ERROR_MESSAGE();
@@ -399,17 +515,77 @@ BEGIN
 END;
 GO
 
-CREATE OR ALTER PROCEDURE sp_prestamo_get_by_user
+/*
+  Recalcula el gasto de los presupuestos vigentes del usuario.
+  presupuestos.monto_gastado es una columna almacenada derivada de transacciones:
+  si un prestamo o un pago crea o borra un GASTO, queda obsoleta.
+*/
+CREATE OR ALTER PROCEDURE sp_prestamo_recalcular_presupuestos
   @UsuarioId BIGINT,
-  @ActivosSolo BIT = NULL -- NULL = todos, 1=activos, 0=inactivos
+  @Fecha     DATETIME2(7) = NULL
+AS
+BEGIN
+  SET NOCOUNT ON;
+
+  DECLARE @FechaRef DATETIME2(7) = COALESCE(@Fecha, DATEADD(HOUR, -5, GETUTCDATE()));
+  DECLARE @PresupuestoId BIGINT;
+
+  DECLARE presupuestos_cursor CURSOR LOCAL FAST_FORWARD FOR
+    SELECT id
+    FROM dbo.presupuestos
+    WHERE usuario_id = @UsuarioId
+      AND activo = 1
+      AND @FechaRef >= fecha_inicio
+      AND @FechaRef <= DATEADD(SECOND, 86399, fecha_fin);
+
+  OPEN presupuestos_cursor;
+  FETCH NEXT FROM presupuestos_cursor INTO @PresupuestoId;
+
+  WHILE @@FETCH_STATUS = 0
+  BEGIN
+    BEGIN TRY
+      EXEC sp_presupuesto_recalc_gasto_internal @Id = @PresupuestoId, @UsuarioId = @UsuarioId;
+    END TRY
+    BEGIN CATCH
+      -- Un presupuesto que falle no debe tumbar la operacion del prestamo
+    END CATCH
+
+    FETCH NEXT FROM presupuestos_cursor INTO @PresupuestoId;
+  END
+
+  CLOSE presupuestos_cursor;
+  DEALLOCATE presupuestos_cursor;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE sp_prestamo_get_by_user
+  @UsuarioId   BIGINT,
+  @ActivosSolo BIT = NULL,          -- compatibilidad: NULL=todos, 1=activos, 0=inactivos
+  @Filtro      NVARCHAR(20) = NULL  -- 'ACTIVOS' | 'SALDADOS' | 'INACTIVOS' | 'TODOS'
 AS
 BEGIN
   SET NOCOUNT ON;
   BEGIN TRY
+    -- Un prestamo saldado deja de ser 'activo' aunque su bandera siga en 1
+    DECLARE @F NVARCHAR(20) = UPPER(LTRIM(RTRIM(COALESCE(
+      @Filtro,
+      CASE WHEN @ActivosSolo IS NULL THEN 'TODOS'
+           WHEN @ActivosSolo = 1 THEN 'ACTIVOS'
+           ELSE 'INACTIVOS' END
+    ))));
+
+    IF (@F NOT IN ('ACTIVOS','SALDADOS','INACTIVOS','TODOS'))
+      SET @F = 'TODOS';
+
     SELECT *
     FROM dbo.prestamos
     WHERE usuario_id=@UsuarioId
-      AND (@ActivosSolo IS NULL OR activa=@ActivosSolo)
+      AND (
+        @F = 'TODOS'
+        OR (@F = 'ACTIVOS'   AND activa = 1 AND saldo_pendiente > 0)
+        OR (@F = 'SALDADOS'  AND saldo_pendiente <= 0)
+        OR (@F = 'INACTIVOS' AND activa = 0 AND saldo_pendiente > 0)
+      )
     ORDER BY fecha_actualizacion DESC;
   END TRY
   BEGIN CATCH
@@ -420,6 +596,41 @@ END;
 GO
 
 /* ========================= PAGOS PRESTAMOS ========================= */
+
+/*
+  Deriva monto_pagado y saldo_pendiente de la suma real de pagos_prestamos.
+  Unica fuente de verdad: la tabla de pagos y monto_total.
+  Sustituye a la aritmetica incremental, que se descuadraba al topar valores.
+*/
+CREATE OR ALTER PROCEDURE sp_prestamo_recalcular
+  @PrestamoId BIGINT
+AS
+BEGIN
+  SET NOCOUNT ON;
+
+  DECLARE @MontoTotal DECIMAL(18,2), @Pagado DECIMAL(18,2);
+
+  SELECT @MontoTotal = monto_total FROM dbo.prestamos WHERE id = @PrestamoId;
+  IF (@MontoTotal IS NULL) RETURN;
+
+  SELECT @Pagado = ISNULL(SUM(COALESCE(monto, monto_pago)), 0)
+  FROM dbo.pagos_prestamos
+  WHERE prestamo_id = @PrestamoId;
+
+  IF (@Pagado < 0) SET @Pagado = 0;
+  IF (@Pagado > @MontoTotal) SET @Pagado = @MontoTotal;
+
+  DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
+
+  UPDATE dbo.prestamos
+  SET monto_pagado = @Pagado,
+      saldo_pendiente = @MontoTotal - @Pagado,
+      estado = CASE WHEN @Pagado >= @MontoTotal THEN 'PAGADO' ELSE 'PENDIENTE' END,
+      fecha_actualizacion = CAST(@FechaHoraLocal AS DATETIME2(0))
+  WHERE id = @PrestamoId;
+END;
+GO
+
 CREATE OR ALTER PROCEDURE sp_prestamo_pago_create
   @UsuarioId   BIGINT,
   @PrestamoId  BIGINT,
@@ -434,12 +645,33 @@ BEGIN
     IF (@Monto IS NULL OR @Monto <= 0) RAISERROR('El monto del pago debe ser mayor a 0',16,1);
     IF (@PrestamoId IS NULL OR @PrestamoId <= 0) RAISERROR('Prestamo inválido',16,1);
 
-    DECLARE @PUsuario BIGINT, @MontoPagadoActual DECIMAL(18,2), @MontoTotal DECIMAL(18,2);
-    SELECT @PUsuario = usuario_id, @MontoPagadoActual = ISNULL(monto_pagado, 0), @MontoTotal = monto_total
+    DECLARE @PUsuario BIGINT, @MontoTotal DECIMAL(18,2), @TipoPrestamo NVARCHAR(20), @NombrePrestamo NVARCHAR(200);
+    SELECT @PUsuario = usuario_id, @MontoTotal = monto_total, @TipoPrestamo = tipo, @NombrePrestamo = nombre
     FROM dbo.prestamos WHERE id=@PrestamoId;
 
     IF (@PUsuario IS NULL) RAISERROR('Préstamo no encontrado',16,1);
     IF (@PUsuario <> @UsuarioId) RAISERROR('No autorizado',16,1);
+
+    IF (@CuentaId IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM dbo.cuentas WHERE id=@CuentaId AND usuario_id=@UsuarioId AND activa=1))
+      RAISERROR('Cuenta no encontrada o inactiva',16,1);
+
+    -- Saldo real segun los pagos registrados, no segun la columna almacenada
+    DECLARE @PagadoReal DECIMAL(18,2) = (
+      SELECT ISNULL(SUM(COALESCE(monto, monto_pago)), 0)
+      FROM dbo.pagos_prestamos WHERE prestamo_id = @PrestamoId
+    );
+    DECLARE @Pendiente DECIMAL(18,2) = @MontoTotal - @PagadoReal;
+
+    IF (@Pendiente <= 0)
+      RAISERROR('El préstamo ya está saldado',16,1);
+
+    IF (@Monto > @Pendiente)
+    BEGIN
+      DECLARE @MsgExceso NVARCHAR(200) =
+        'El pago supera el saldo pendiente (' + CONVERT(NVARCHAR(30), @Pendiente) + ')';
+      RAISERROR(@MsgExceso,16,1);
+    END
 
     -- Convertir a zona horaria America/Bogota (UTC-5)
     DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
@@ -448,37 +680,63 @@ BEGIN
     BEGIN TRAN;
 
     DECLARE @FechaCreacion DATETIME2(0) = CAST(@FechaHoraLocal AS DATETIME2(0));
+    DECLARE @TransaccionId BIGINT = NULL;
+
+    /*
+      Pagar una DEUDA es dinero que SALE; cobrar un PRESTAMO es dinero que ENTRA.
+      Sin cuenta el pago solo mueve el saldo del prestamo, no el de ninguna cuenta.
+    */
+    IF (@CuentaId IS NOT NULL AND COL_LENGTH('dbo.pagos_prestamos','transaccion_id') IS NOT NULL)
+    BEGIN
+      DECLARE @TipoMovId BIGINT;
+      DECLARE @CategoriaId BIGINT;
+      DECLARE @MonedaCuenta NVARCHAR(10);
+
+      SELECT @TipoMovId = id FROM dbo.tipos_transaccion
+      WHERE nombre = CASE WHEN @TipoPrestamo = 'DEUDA' THEN 'GASTO' ELSE 'INGRESO' END AND activo = 1;
+
+      SELECT @CategoriaId = id FROM dbo.categorias
+      WHERE usuario_id IS NULL AND nombre = 'Préstamos y deudas';
+
+      SELECT @MonedaCuenta = moneda FROM dbo.cuentas WHERE id = @CuentaId;
+
+      IF @TipoMovId IS NULL
+        RAISERROR('No existe el tipo de transaccion requerido',16,1);
+
+      INSERT INTO dbo.transacciones (
+        usuario_id, cuenta_id, tipo_transaccion_id, categoria_id, metodo_pago_id,
+        monto, moneda, titulo, descripcion, fecha_transaccion,
+        archivo_adjunto, notas, repetir, activa, fecha_creacion
+      )
+      VALUES (
+        @UsuarioId, @CuentaId, @TipoMovId, @CategoriaId, NULL,
+        @Monto, COALESCE(@MonedaCuenta, 'COP'),
+        CASE WHEN @TipoPrestamo = 'DEUDA' THEN 'Pago de: ' ELSE 'Cobro de: ' END
+          + COALESCE(@NombrePrestamo, 'préstamo'),
+        NULL, @FechaPago,
+        NULL, @Notas, 0, 1, @FechaCreacion
+      );
+
+      SET @TransaccionId = SCOPE_IDENTITY();
+    END
 
     IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.pagos_prestamos') AND name = 'monto_pago')
     BEGIN
-      INSERT INTO dbo.pagos_prestamos (prestamo_id, cuenta_id, monto_pago, fecha_pago, notas, fecha_creacion)
-      VALUES (@PrestamoId, @CuentaId, @Monto, @FechaPago, @Notas, @FechaCreacion);
+      INSERT INTO dbo.pagos_prestamos (prestamo_id, cuenta_id, monto_pago, fecha_pago, notas, fecha_creacion, transaccion_id)
+      VALUES (@PrestamoId, @CuentaId, @Monto, @FechaPago, @Notas, @FechaCreacion, @TransaccionId);
     END
     ELSE
     BEGIN
-      INSERT INTO dbo.pagos_prestamos (prestamo_id, cuenta_id, monto, fecha_pago, notas, fecha_creacion)
-      VALUES (@PrestamoId, @CuentaId, @Monto, @FechaPago, @Notas, @FechaCreacion);
+      INSERT INTO dbo.pagos_prestamos (prestamo_id, cuenta_id, monto, fecha_pago, notas, fecha_creacion, transaccion_id)
+      VALUES (@PrestamoId, @CuentaId, @Monto, @FechaPago, @Notas, @FechaCreacion, @TransaccionId);
     END
 
-    DECLARE @NuevoMontoPagado DECIMAL(18,2) = @MontoPagadoActual + @Monto;
-    DECLARE @MontoPagadoFinal DECIMAL(18,2) = CASE 
-                         WHEN @NuevoMontoPagado > @MontoTotal THEN @MontoTotal
-                         ELSE @NuevoMontoPagado 
-                       END;
-    DECLARE @NuevoSaldoPendiente DECIMAL(18,2) = @MontoTotal - @MontoPagadoFinal;
-    
-    UPDATE dbo.prestamos
-    SET monto_pagado = @MontoPagadoFinal,
-        saldo_pendiente = @NuevoSaldoPendiente,
-        estado = CASE 
-                   WHEN @NuevoMontoPagado >= @MontoTotal THEN 'PAGADO'
-                   WHEN @NuevoMontoPagado = 0 THEN 'PENDIENTE'
-                   ELSE estado
-                 END,
-        fecha_actualizacion = CAST(@FechaHoraLocal AS DATETIME2(0))
-    WHERE id=@PrestamoId;
+    EXEC sp_prestamo_recalcular @PrestamoId = @PrestamoId;
 
     COMMIT TRAN;
+
+    IF (@TransaccionId IS NOT NULL AND @TipoPrestamo = 'DEUDA')
+      EXEC sp_prestamo_recalcular_presupuestos @UsuarioId = @UsuarioId, @Fecha = @FechaHoraLocal;
 
     SELECT p.*, (SELECT SUM(COALESCE(monto, monto_pago)) FROM dbo.pagos_prestamos WHERE prestamo_id=@PrestamoId) AS total_pagado
     FROM dbo.prestamos p WHERE p.id=@PrestamoId;
@@ -504,14 +762,33 @@ BEGIN
   BEGIN TRY
     IF (@PagoId IS NULL OR @PagoId <= 0) RAISERROR('Pago inválido',16,1);
 
-    DECLARE @PrestamoId BIGINT, @PUsuario BIGINT, @MontoAnterior DECIMAL(18,2), @MontoPagadoPrestamo DECIMAL(18,2), @MontoTotalPrestamo DECIMAL(18,2);
+    DECLARE @PrestamoId BIGINT, @PUsuario BIGINT, @MontoAnterior DECIMAL(18,2), @MontoTotalPrestamo DECIMAL(18,2);
     SELECT @PrestamoId = prestamo_id, @MontoAnterior = COALESCE(monto, monto_pago)
     FROM dbo.pagos_prestamos WHERE id=@PagoId;
 
     IF (@PrestamoId IS NULL) RAISERROR('Pago no encontrado',16,1);
-    SELECT @PUsuario = usuario_id, @MontoPagadoPrestamo = ISNULL(monto_pagado, 0), @MontoTotalPrestamo = monto_total
+    SELECT @PUsuario = usuario_id, @MontoTotalPrestamo = monto_total
     FROM dbo.prestamos WHERE id=@PrestamoId;
     IF (@PUsuario <> @UsuarioId) RAISERROR('No autorizado',16,1);
+
+    -- El nuevo monto no puede hacer que la suma de pagos supere el total
+    IF (@Monto IS NOT NULL)
+    BEGIN
+      DECLARE @PagadoOtros DECIMAL(18,2) = (
+        SELECT ISNULL(SUM(COALESCE(monto, monto_pago)), 0)
+        FROM dbo.pagos_prestamos
+        WHERE prestamo_id = @PrestamoId AND id <> @PagoId
+      );
+      IF (@Monto <= 0)
+        RAISERROR('El monto del pago debe ser mayor a 0',16,1);
+      IF (@PagadoOtros + @Monto > @MontoTotalPrestamo)
+      BEGIN
+        DECLARE @MsgTope NVARCHAR(200) =
+          'El pago supera el saldo pendiente (' +
+          CONVERT(NVARCHAR(30), @MontoTotalPrestamo - @PagadoOtros) + ')';
+        RAISERROR(@MsgTope,16,1);
+      END
+    END
 
     -- Convertir a zona horaria America/Bogota (UTC-5)
     DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
@@ -537,29 +814,26 @@ BEGIN
       WHERE id=@PagoId;
     END
 
-    -- Recalcular saldo en base a la diferencia del pago
-    DECLARE @MontoNuevo DECIMAL(18,2) = (SELECT COALESCE(monto, monto_pago) FROM dbo.pagos_prestamos WHERE id=@PagoId);
-    DECLARE @Diff DECIMAL(18,2) = ISNULL(@MontoNuevo,0) - ISNULL(@MontoAnterior,0);
-    DECLARE @NuevoMontoPagado DECIMAL(18,2) = @MontoPagadoPrestamo + @Diff;
-    DECLARE @MontoPagadoFinal DECIMAL(18,2) = CASE 
-                         WHEN @NuevoMontoPagado > @MontoTotalPrestamo THEN @MontoTotalPrestamo
-                         WHEN @NuevoMontoPagado < 0 THEN 0
-                         ELSE @NuevoMontoPagado
-                       END;
-    DECLARE @NuevoSaldoPendiente DECIMAL(18,2) = @MontoTotalPrestamo - @MontoPagadoFinal;
+    -- Mantener el movimiento asociado en linea con el pago editado
+    IF COL_LENGTH('dbo.pagos_prestamos','transaccion_id') IS NOT NULL
+    BEGIN
+      DECLARE @TxPago BIGINT = (SELECT transaccion_id FROM dbo.pagos_prestamos WHERE id=@PagoId);
+      IF (@TxPago IS NOT NULL)
+      BEGIN
+        UPDATE dbo.transacciones
+        SET monto = COALESCE(@Monto, monto),
+            fecha_transaccion = COALESCE(CAST(@FechaPago AS DATETIME2(0)), fecha_transaccion),
+            cuenta_id = COALESCE(@CuentaId, cuenta_id),
+            notas = COALESCE(@Notas, notas)
+        WHERE id = @TxPago AND usuario_id = @UsuarioId;
+      END
+    END
 
-    UPDATE dbo.prestamos
-    SET monto_pagado = @MontoPagadoFinal,
-        saldo_pendiente = @NuevoSaldoPendiente,
-        estado = CASE 
-                   WHEN @NuevoMontoPagado >= @MontoTotalPrestamo THEN 'PAGADO'
-                   WHEN @NuevoMontoPagado = 0 THEN 'PENDIENTE'
-                   ELSE estado
-                 END,
-        fecha_actualizacion = CAST(@FechaHoraLocal AS DATETIME2(0))
-    WHERE id=@PrestamoId;
+    EXEC sp_prestamo_recalcular @PrestamoId = @PrestamoId;
 
     COMMIT TRAN;
+
+    EXEC sp_prestamo_recalcular_presupuestos @UsuarioId = @UsuarioId, @Fecha = @FechaHoraLocal;
 
     SELECT * FROM dbo.pagos_prestamos WHERE id=@PagoId;
   END TRY
@@ -580,36 +854,31 @@ BEGIN
   BEGIN TRY
     IF (@PagoId IS NULL OR @PagoId <= 0) RAISERROR('Pago inválido',16,1);
 
-    DECLARE @PrestamoId BIGINT, @PUsuario BIGINT, @Monto DECIMAL(18,2), @MontoPagadoPrestamo DECIMAL(18,2), @MontoTotalPrestamo DECIMAL(18,2);
-    SELECT @PrestamoId = prestamo_id, @Monto = COALESCE(monto, monto_pago) FROM dbo.pagos_prestamos WHERE id=@PagoId;
+    DECLARE @PrestamoId BIGINT, @PUsuario BIGINT, @TransaccionId BIGINT = NULL;
+    SELECT @PrestamoId = prestamo_id FROM dbo.pagos_prestamos WHERE id=@PagoId;
     IF (@PrestamoId IS NULL) RAISERROR('Pago no encontrado',16,1);
-    SELECT @PUsuario = usuario_id, @MontoPagadoPrestamo = ISNULL(monto_pagado, 0), @MontoTotalPrestamo = monto_total
-    FROM dbo.prestamos WHERE id=@PrestamoId;
+    SELECT @PUsuario = usuario_id FROM dbo.prestamos WHERE id=@PrestamoId;
     IF (@PUsuario <> @UsuarioId) RAISERROR('No autorizado',16,1);
 
-    -- Convertir a zona horaria America/Bogota (UTC-5)
+    IF COL_LENGTH('dbo.pagos_prestamos','transaccion_id') IS NOT NULL
+      SELECT @TransaccionId = transaccion_id FROM dbo.pagos_prestamos WHERE id=@PagoId;
+
     DECLARE @FechaHoraLocal DATETIME2(7) = DATEADD(HOUR, -5, GETUTCDATE());
 
     BEGIN TRAN;
 
     DELETE FROM dbo.pagos_prestamos WHERE id=@PagoId;
 
-    DECLARE @NuevoMontoPagado DECIMAL(18,2) = @MontoPagadoPrestamo - ISNULL(@Monto,0);
-    DECLARE @MontoPagadoFinal DECIMAL(18,2) = CASE WHEN @NuevoMontoPagado < 0 THEN 0 ELSE @NuevoMontoPagado END;
-    DECLARE @NuevoSaldoPendiente DECIMAL(18,2) = @MontoTotalPrestamo - @MontoPagadoFinal;
-    
-    UPDATE dbo.prestamos
-    SET monto_pagado = @MontoPagadoFinal,
-        saldo_pendiente = @NuevoSaldoPendiente,
-        estado = CASE 
-                   WHEN @NuevoMontoPagado <= 0 THEN 'PENDIENTE'
-                   WHEN @NuevoMontoPagado >= @MontoTotalPrestamo THEN 'PAGADO'
-                   ELSE estado
-                 END,
-        fecha_actualizacion = CAST(@FechaHoraLocal AS DATETIME2(0))
-    WHERE id=@PrestamoId;
+    -- Devolver el dinero a la cuenta eliminando el movimiento que genero el pago
+    IF (@TransaccionId IS NOT NULL)
+      DELETE FROM dbo.transacciones WHERE id=@TransaccionId AND usuario_id=@UsuarioId;
+
+    EXEC sp_prestamo_recalcular @PrestamoId = @PrestamoId;
 
     COMMIT TRAN;
+
+    IF (@TransaccionId IS NOT NULL)
+      EXEC sp_prestamo_recalcular_presupuestos @UsuarioId = @UsuarioId, @Fecha = @FechaHoraLocal;
   END TRY
   BEGIN CATCH
     IF @@TRANCOUNT > 0 ROLLBACK TRAN;

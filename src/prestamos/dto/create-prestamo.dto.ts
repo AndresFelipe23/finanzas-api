@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsNumber, IsOptional, IsString, IsIn } from 'class-validator';
+import { IsBoolean, IsNotEmpty, IsNumber, IsOptional, IsString, IsIn } from 'class-validator';
 
 export class CreatePrestamoDto {
   @ApiProperty({ example: 'Préstamo carro', description: 'Nombre del préstamo' })
@@ -41,6 +41,16 @@ export class CreatePrestamoDto {
   @IsOptional()
   @IsString()
   notas?: string;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'Si es true y hay cuentaId, genera el movimiento real: ingreso para DEUDA (recibes el dinero) o gasto para PRESTAMO (lo entregas). Usar false al registrar un préstamo antiguo.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  registrarMovimiento?: boolean;
 }
 
 

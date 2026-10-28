@@ -39,27 +39,28 @@ export class TransaccionesService {
         throw new BadRequestException('El monto debe ser mayor que cero');
       }
 
-      // Si se envía fechaTransaccion, usar la fecha del usuario pero con la hora actual del sistema
-      // Si no se envía, usar fecha y hora actual del sistema
-      let fechaValida: Date;
-      if (fechaTransaccion) {
-        const str = fechaTransaccion as unknown as string;
-        // Parsear la fecha enviada (solo fecha, hora será del sistema)
-        const m = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
-        if (m) {
-          const y = Number(m[1]);
-          const mo = Number(m[2]) - 1;
-          const d = Number(m[3]);
-          // Usar la fecha del usuario pero con la hora actual del sistema
-          const ahora = new Date();
-          fechaValida = new Date(y, mo, d, ahora.getHours(), ahora.getMinutes(), ahora.getSeconds(), ahora.getMilliseconds());
-        } else {
-          // Si no se puede parsear, usar fecha y hora actual
-          fechaValida = new Date();
-        }
+      // Fecha objetivo en calendario Colombia (UTC-5), como 'YYYY-MM-DD'.
+      // Se pasa como STRING (no como Date) para que el driver no la desplace de
+      // día al convertir a UTC. El SP le añade la hora local actual.
+      const COL_OFFSET_MS = 5 * 60 * 60 * 1000;
+      const entrada = typeof fechaTransaccion === 'string' ? fechaTransaccion.trim() : '';
+      // Fecha/hora local SIN zona (p. ej. '2026-07-25' o '2026-07-25T12:00:00'):
+      // su parte de fecha ya es la que el usuario quiere.
+      const sinZona = entrada.match(
+        /^(\d{4}-\d{2}-\d{2})(?:[T\s]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?)?$/,
+      );
+
+      let fechaColombia: string;
+      if (sinZona) {
+        fechaColombia = sinZona[1];
+      } else if (entrada) {
+        // Instante absoluto (con Z u offset): convertir a hora Colombia.
+        const inst = new Date(entrada);
+        const base = isNaN(inst.getTime()) ? new Date() : inst;
+        fechaColombia = new Date(base.getTime() - COL_OFFSET_MS).toISOString().slice(0, 10);
       } else {
-        // Si no se envía fecha, usar fecha y hora actual del sistema
-        fechaValida = new Date();
+        // Sin fecha: hoy en Colombia.
+        fechaColombia = new Date(Date.now() - COL_OFFSET_MS).toISOString().slice(0, 10);
       }
 
       // Preparar parámetros
@@ -73,7 +74,7 @@ export class TransaccionesService {
         moneda || 'COP',
         titulo !== undefined && titulo !== null && titulo !== '' ? titulo : null,
         descripcion !== undefined && descripcion !== null && descripcion !== '' ? descripcion : null,
-        fechaValida,
+        fechaColombia,
         archivoAdjunto !== undefined && archivoAdjunto !== null && archivoAdjunto !== '' ? archivoAdjunto : null,
         notas !== undefined && notas !== null && notas !== '' ? notas : null,
         repetir ? 1 : 0,
@@ -593,6 +594,18 @@ export class TransaccionesService {
   private mapToResponseDto(transaccion: any): TransaccionResponseDto {
     if (!transaccion) {
       throw new Error('Transacción es null o undefined');
+    }
+
+    // Si el stored procedure devuelve varios result sets, el driver solo entrega
+    // el primero. Detectarlo aquí evita un "parseInt: undefined" indescifrable.
+    if (transaccion.tipo_transaccion_id === undefined || transaccion.fecha_transaccion === undefined) {
+      this.logger.error(
+        `El result set recibido no corresponde a una transacción: ${JSON.stringify(transaccion)}`,
+      );
+      throw new Error(
+        'El servidor devolvió un resultado que no corresponde a una transacción. ' +
+          'Revisa que los stored procedures no emitan result sets adicionales.',
+      );
     }
 
     // Función para convertir fecha a string en formato local (sin Z, sin conversión UTC)

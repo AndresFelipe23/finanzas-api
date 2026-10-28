@@ -6,6 +6,8 @@ import { UpdateMetaDto } from './dto/update-meta.dto';
 import { MetaResponseDto } from './dto/meta-response.dto';
 import { CreateAporteDto } from './dto/create-aporte.dto';
 
+export type MetaFiltro = 'ACTIVAS' | 'COMPLETADAS' | 'PAUSADAS' | 'TODAS';
+
 @Injectable()
 export class MetasService {
   private readonly logger = new Logger(MetasService.name);
@@ -45,7 +47,7 @@ export class MetasService {
   /**
    * Obtiene todas las metas del usuario con filtro opcional
    */
-  async findAll(usuarioId: number, filtro: 'ACTIVAS' | 'COMPLETADAS' | 'TODAS' = 'TODAS'): Promise<MetaResponseDto[]> {
+  async findAll(usuarioId: number, filtro: MetaFiltro = 'TODAS'): Promise<MetaResponseDto[]> {
     try {
       const result = await this.connection.manager.query(
         `EXEC sp_meta_get_by_user @UsuarioId=@0, @Filtro=@1`,
@@ -207,6 +209,37 @@ export class MetasService {
       }
       
       throw new Error(`Error al crear aporte: ${error.message}`);
+    }
+  }
+
+  /**
+   * Elimina un aporte y revierte su efecto: baja el monto de la meta y
+   * borra el GASTO asociado, devolviendo el dinero a la cuenta origen
+   */
+  async removeAporte(aporteId: number, usuarioId: number): Promise<MetaResponseDto> {
+    try {
+      const result = await this.connection.manager.query(
+        `EXEC sp_meta_aporte_delete @UsuarioId=@0, @AporteId=@1`,
+        [usuarioId, aporteId],
+      );
+
+      if (!result || result.length === 0) {
+        throw new NotFoundException('Aporte no encontrado');
+      }
+
+      return this.mapToResponseDto(result[0]);
+    } catch (error) {
+      this.logger.error(`Error al eliminar aporte: ${error.message}`);
+
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+
+      if (String(error.message || '').includes('Aporte no encontrado')) {
+        throw new NotFoundException('Aporte no encontrado');
+      }
+
+      throw new Error(`Error al eliminar aporte: ${error.message}`);
     }
   }
 

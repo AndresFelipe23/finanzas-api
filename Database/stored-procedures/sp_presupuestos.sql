@@ -90,7 +90,11 @@ END;
 GO
 
 /* ========================= UTIL: Recalcular Gasto ========================= */
-CREATE OR ALTER PROCEDURE sp_presupuesto_recalc_gasto
+/* Version interna: NO devuelve result set. La usan los SPs que despues
+   retornan su propia fila (transacciones, metas, prestamos); si esta version
+   hiciera SELECT, ese result set llegaria primero al driver y el llamador
+   recibiria una fila de presupuestos en lugar de la suya. */
+CREATE OR ALTER PROCEDURE sp_presupuesto_recalc_gasto_internal
   @Id        BIGINT,
   @UsuarioId BIGINT
 AS
@@ -136,13 +140,25 @@ BEGIN
     SET monto_gastado = @Gastado,
         fecha_actualizacion = CAST(@FechaHoraLocal AS DATETIME2(0))
     WHERE id=@Id AND usuario_id=@UsuarioId;
-
-    SELECT * FROM dbo.presupuestos WHERE id=@Id AND usuario_id=@UsuarioId;
   END TRY
   BEGIN CATCH
     DECLARE @Msg NVARCHAR(4000) = ERROR_MESSAGE();
     RAISERROR(@Msg, 16, 1);
   END CATCH
+END;
+GO
+
+/* Version publica: recalcula y devuelve el presupuesto actualizado.
+   La usan el endpoint /presupuestos/:id/recalc, sp_presupuesto_create
+   y sp_presupuesto_update, donde esa fila SI es la respuesta esperada. */
+CREATE OR ALTER PROCEDURE sp_presupuesto_recalc_gasto
+  @Id        BIGINT,
+  @UsuarioId BIGINT
+AS
+BEGIN
+  SET NOCOUNT ON;
+  EXEC sp_presupuesto_recalc_gasto_internal @Id=@Id, @UsuarioId=@UsuarioId;
+  SELECT * FROM dbo.presupuestos WHERE id=@Id AND usuario_id=@UsuarioId;
 END;
 GO
 

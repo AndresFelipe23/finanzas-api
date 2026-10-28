@@ -1,5 +1,6 @@
 import { Injectable, Module, OnModuleInit } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { InjectConnection, TypeOrmModule } from '@nestjs/typeorm';
 import { Connection } from 'typeorm';
 import { AppController } from './app.controller';
@@ -16,6 +17,7 @@ import { Cuenta } from './cuentas/entities/cuenta.entity';
 import { Transaccion } from './transacciones/entities/transaccion.entity';
 import { PrestamosModule } from './prestamos/prestamos.module';
 import { PresupuestosModule } from './presupuestos/presupuestos.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 import { TarjetasNfcModule } from './tarjetas-nfc/tarjetas-nfc.module';
 import { PagosNfcModule } from './pagos-nfc/pagos-nfc.module';
 import { DispositivosNfcModule } from './dispositivos-nfc/dispositivos-nfc.module';
@@ -48,6 +50,8 @@ export class AppServiceInit implements OnModuleInit {
       isGlobal: true,
       envFilePath: '.env',
     }),
+    // Registrado global; solo limita donde se aplica @UseGuards(ThrottlerGuard).
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => {
@@ -78,6 +82,7 @@ export class AppServiceInit implements OnModuleInit {
     MetasModule,
     PrestamosModule,
     PresupuestosModule,
+    DashboardModule,
     TarjetasNfcModule,
     PagosNfcModule,
     DispositivosNfcModule,

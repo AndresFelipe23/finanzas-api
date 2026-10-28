@@ -6,6 +6,8 @@ import { UpdatePrestamoDto } from './dto/update-prestamo.dto';
 import { CreatePagoPrestamoDto } from './dto/create-pago-prestamo.dto';
 import { UpdatePagoPrestamoDto } from './dto/update-pago-prestamo.dto';
 
+export type PrestamoFiltro = 'ACTIVOS' | 'SALDADOS' | 'INACTIVOS' | 'TODOS';
+
 @Injectable()
 export class PrestamosService {
   private readonly logger = new Logger(PrestamosService.name);
@@ -20,7 +22,7 @@ export class PrestamosService {
 
   async create(usuarioId: number, dto: CreatePrestamoDto) {
     const result = await this.connection.manager.query(
-      `EXEC sp_prestamo_create @UsuarioId=@0,@Nombre=@1,@Tipo=@2,@MontoTotal=@3,@TasaInteres=@4,@FechaInicio=@5,@FechaFin=@6,@CuentaId=@7,@Notas=@8`,
+      `EXEC sp_prestamo_create @UsuarioId=@0,@Nombre=@1,@Tipo=@2,@MontoTotal=@3,@TasaInteres=@4,@FechaInicio=@5,@FechaFin=@6,@CuentaId=@7,@Notas=@8,@RegistrarMovimiento=@9`,
       [
         usuarioId,
         dto.nombre,
@@ -31,15 +33,20 @@ export class PrestamosService {
         dto.fechaFin ?? null,
         dto.cuentaId ?? null,
         dto.notas ?? null,
+        dto.registrarMovimiento ? 1 : 0,
       ],
     );
     return this.ensureArray(result)[0];
   }
 
-  async findAll(usuarioId: number, activosSolo?: boolean) {
+  async findAll(usuarioId: number, activosSolo?: boolean, filtro?: PrestamoFiltro) {
     const result = await this.connection.manager.query(
-      `EXEC sp_prestamo_get_by_user @UsuarioId=@0,@ActivosSolo=@1`,
-      [usuarioId, activosSolo === undefined ? null : activosSolo ? 1 : 0],
+      `EXEC sp_prestamo_get_by_user @UsuarioId=@0,@ActivosSolo=@1,@Filtro=@2`,
+      [
+        usuarioId,
+        activosSolo === undefined ? null : activosSolo ? 1 : 0,
+        filtro ?? null,
+      ],
     );
     return this.ensureArray(result);
   }

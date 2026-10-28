@@ -105,7 +105,7 @@ export class CuentasService {
           AND t.activa = 1
         WHERE c.usuario_id = @0 
           AND c.activa = 1
-        GROUP BY c.id, c.usuario_id, c.nombre, c.tipo, c.moneda, c.saldo_inicial, 
+        GROUP BY c.id, c.usuario_id, c.nombre, c.tipo, c.moneda, c.saldo_inicial,
                  c.color, c.icono, c.descripcion, c.activa, c.fecha_creacion
         ORDER BY c.nombre
       `;
@@ -158,7 +158,7 @@ export class CuentasService {
         WHERE c.id = @1
           AND c.usuario_id = @0
           AND c.activa = 1
-        GROUP BY c.id, c.usuario_id, c.nombre, c.tipo, c.moneda, c.saldo_inicial, 
+        GROUP BY c.id, c.usuario_id, c.nombre, c.tipo, c.moneda, c.saldo_inicial,
                  c.color, c.icono, c.descripcion, c.activa, c.fecha_creacion
       `;
 
@@ -352,7 +352,7 @@ export class CuentasService {
         WHERE c.usuario_id = @0 
           AND c.tipo = @1
           AND c.activa = 1
-        GROUP BY c.id, c.usuario_id, c.nombre, c.tipo, c.moneda, c.saldo_inicial, 
+        GROUP BY c.id, c.usuario_id, c.nombre, c.tipo, c.moneda, c.saldo_inicial,
                  c.color, c.icono, c.descripcion, c.activa, c.fecha_creacion
         ORDER BY c.nombre
       `;
@@ -409,7 +409,8 @@ export class CuentasService {
           AND t.activa = 1
         WHERE c.usuario_id = @0 
           AND c.activa = 1
-        GROUP BY c.id, c.nombre, c.tipo, c.moneda, c.saldo_inicial, c.color, c.icono
+        GROUP BY c.id, c.nombre, c.tipo, c.moneda,           c.saldo_inicial,
+          c.color, c.icono
         ORDER BY saldo_actual DESC, c.nombre
       `;
 

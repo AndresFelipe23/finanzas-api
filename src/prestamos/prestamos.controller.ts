@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Body, Patch, Param, Query, Delete, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth } from '@nestjs/swagger';
-import { PrestamosService } from './prestamos.service';
+import { PrestamosService, type PrestamoFiltro } from './prestamos.service';
 import { CreatePrestamoDto } from './dto/create-prestamo.dto';
 import { UpdatePrestamoDto } from './dto/update-prestamo.dto';
 import { CreatePagoPrestamoDto } from './dto/create-pago-prestamo.dto';
@@ -26,9 +26,14 @@ export class PrestamosController {
   async findAll(
     @CurrentUserId() usuarioId: number,
     @Query('activos') activos?: string,
+    @Query('filtro') filtro?: string,
   ) {
     const flag = activos === undefined ? undefined : activos === 'true' || activos === '1';
-    return await this.prestamosService.findAll(usuarioId, flag);
+    const permitidos: PrestamoFiltro[] = ['ACTIVOS', 'SALDADOS', 'INACTIVOS', 'TODOS'];
+    const filtroFinal = permitidos.includes(filtro as PrestamoFiltro)
+      ? (filtro as PrestamoFiltro)
+      : undefined;
+    return await this.prestamosService.findAll(usuarioId, flag, filtroFinal);
   }
 
   @Get(':id')

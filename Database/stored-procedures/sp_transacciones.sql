@@ -157,23 +157,52 @@ BEGIN
             CAST(@FechaHoraLocal AS DATETIME2(0))
         )
         
-        -- Recalcular presupuestos afectados si es un GASTO
-        -- Comentado temporalmente para evitar errores - se puede activar después
-        -- IF @TipoTransaccionId = @TipoGastoId AND @TipoGastoId IS NOT NULL
-        -- BEGIN
-        --     -- Recalcular presupuestos afectados (implementación futura)
-        -- END
-        
-        -- Retornar la transacción creada
+        -- Capturar el ID recien insertado antes de recalcular presupuestos,
+        -- para que SCOPE_IDENTITY() no dependa de operaciones posteriores.
         DECLARE @NewTransaccionId BIGINT = SCOPE_IDENTITY();
-        
+
         IF @NewTransaccionId IS NULL
         BEGIN
             RAISERROR('Error al crear la transacción: no se obtuvo el ID', 16, 1);
             RETURN;
         END
-        
-        SELECT 
+
+        -- Recalcular presupuestos afectados si es un GASTO.
+        -- Debe ir DESPUES del INSERT: sp_presupuesto_recalc_gasto suma la tabla transacciones.
+        IF @TipoTransaccionId = @TipoGastoId
+        BEGIN
+            DECLARE @PresupuestoId BIGINT;
+            DECLARE presupuestos_cursor CURSOR FOR
+                SELECT id
+                FROM presupuestos
+                WHERE usuario_id = @UsuarioId
+                  AND activo = 1
+                  AND @FechaTransaccion >= fecha_inicio
+                  AND @FechaTransaccion <= DATEADD(SECOND, 86399, fecha_fin)
+                  AND (categoria_id IS NULL OR categoria_id = @CategoriaId)
+                  AND (cuenta_id IS NULL OR cuenta_id = @CuentaId);
+
+            OPEN presupuestos_cursor;
+            FETCH NEXT FROM presupuestos_cursor INTO @PresupuestoId;
+
+            WHILE @@FETCH_STATUS = 0
+            BEGIN
+                BEGIN TRY
+                    EXEC sp_presupuesto_recalc_gasto_internal @Id = @PresupuestoId, @UsuarioId = @UsuarioId;
+                END TRY
+                BEGIN CATCH
+                    -- Continuar con el siguiente presupuesto si hay error
+                END CATCH
+
+                FETCH NEXT FROM presupuestos_cursor INTO @PresupuestoId;
+            END
+
+            CLOSE presupuestos_cursor;
+            DEALLOCATE presupuestos_cursor;
+        END
+
+        -- Retornar la transacción creada
+        SELECT
             t.id,
             t.usuario_id,
             t.cuenta_id,
@@ -345,7 +374,7 @@ BEGIN
             WHILE @@FETCH_STATUS = 0
             BEGIN
                 BEGIN TRY
-                    EXEC sp_presupuesto_recalc_gasto @Id = @PresupuestoId, @UsuarioId = @UsuarioId;
+                    EXEC sp_presupuesto_recalc_gasto_internal @Id = @PresupuestoId, @UsuarioId = @UsuarioId;
                 END TRY
                 BEGIN CATCH
                     -- Continuar con el siguiente presupuesto si hay error
@@ -453,7 +482,7 @@ BEGIN
             WHILE @@FETCH_STATUS = 0
             BEGIN
                 BEGIN TRY
-                    EXEC sp_presupuesto_recalc_gasto @Id = @PresupuestoId, @UsuarioId = @UsuarioId;
+                    EXEC sp_presupuesto_recalc_gasto_internal @Id = @PresupuestoId, @UsuarioId = @UsuarioId;
                 END TRY
                 BEGIN CATCH
                     -- Continuar con el siguiente presupuesto si hay error
@@ -533,7 +562,7 @@ BEGIN
             WHILE @@FETCH_STATUS = 0
             BEGIN
                 BEGIN TRY
-                    EXEC sp_presupuesto_recalc_gasto @Id = @PresupuestoId, @UsuarioId = @UsuarioId;
+                    EXEC sp_presupuesto_recalc_gasto_internal @Id = @PresupuestoId, @UsuarioId = @UsuarioId;
                 END TRY
                 BEGIN CATCH
                     -- Continuar con el siguiente presupuesto si hay error
@@ -702,7 +731,7 @@ BEGIN
         WHILE @@FETCH_STATUS = 0
         BEGIN
             BEGIN TRY
-                EXEC sp_presupuesto_recalc_gasto @Id = @PresupuestoId, @UsuarioId = @UsuarioId;
+                EXEC sp_presupuesto_recalc_gasto_internal @Id = @PresupuestoId, @UsuarioId = @UsuarioId;
             END TRY
             BEGIN CATCH
                 -- Continuar con el siguiente presupuesto si hay error
@@ -1000,13 +1029,15 @@ BEGIN
     SELECT @TipoIngresoId = id FROM tipos_transaccion WHERE nombre = 'INGRESO' AND activo = 1;
     SELECT @TipoGastoId = id FROM tipos_transaccion WHERE nombre = 'GASTO' AND activo = 1;
     
-    SELECT 
-        -- Resumen general
-        COUNT(*) AS total_transacciones,
-        SUM(CASE WHEN t.tipo_transaccion_id = @TipoIngresoId THEN t.monto ELSE 0 END) AS total_ingresos,
-        SUM(CASE WHEN t.tipo_transaccion_id = @TipoGastoId THEN t.monto ELSE 0 END) AS total_gastos,
-        SUM(CASE WHEN t.tipo_transaccion_id = @TipoIngresoId THEN t.monto ELSE 0 END) - 
-        SUM(CASE WHEN t.tipo_transaccion_id = @TipoGastoId THEN t.monto ELSE 0 END) AS balance,
+    SELECT
+        -- Resumen general: totales de TODO el rango, no de cada categoría.
+        -- Se usan agregados de ventana (OVER()) para que el gran total se
+        -- repita idéntico en cada fila, pese al GROUP BY por categoría.
+        SUM(COUNT(*)) OVER () AS total_transacciones,
+        SUM(SUM(CASE WHEN t.tipo_transaccion_id = @TipoIngresoId THEN t.monto ELSE 0 END)) OVER () AS total_ingresos,
+        SUM(SUM(CASE WHEN t.tipo_transaccion_id = @TipoGastoId THEN t.monto ELSE 0 END)) OVER () AS total_gastos,
+        SUM(SUM(CASE WHEN t.tipo_transaccion_id = @TipoIngresoId THEN t.monto ELSE 0 END)) OVER () -
+        SUM(SUM(CASE WHEN t.tipo_transaccion_id = @TipoGastoId THEN t.monto ELSE 0 END)) OVER () AS balance,
         -- Por categoría
         t.categoria_id,
         c.nombre AS categoria_nombre,
