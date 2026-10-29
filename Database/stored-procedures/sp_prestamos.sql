@@ -178,7 +178,10 @@ CREATE OR ALTER PROCEDURE sp_prestamo_create
   @CuentaId       BIGINT = NULL,
   @Notas          NVARCHAR(1000) = NULL,
   @NombreDeudorPrestador NVARCHAR(200) = NULL,
-  @RegistrarMovimiento BIT = 0
+  @RegistrarMovimiento BIT = 0,
+  -- Monto del movimiento inicial si no es @MontoTotal: en un crédito en
+  -- cuotas @MontoTotal incluye intereses y el movimiento es lo prestado
+  @MontoMovimiento DECIMAL(18,2) = NULL
 AS
 BEGIN
   SET NOCOUNT ON;
@@ -293,7 +296,7 @@ BEGIN
       )
       VALUES (
         @UsuarioId, @CuentaId, @TipoMovId, @CategoriaId, NULL,
-        @MontoTotal, COALESCE(@MonedaCuenta, 'COP'),
+        COALESCE(@MontoMovimiento, @MontoTotal), COALESCE(@MonedaCuenta, 'COP'),
         CASE WHEN @Tipo = 'DEUDA' THEN 'Préstamo recibido: ' ELSE 'Préstamo entregado: ' END + @Nombre,
         NULL, @FechaInicio,
         NULL, @Notas, 0, 1, @FechaCreacion

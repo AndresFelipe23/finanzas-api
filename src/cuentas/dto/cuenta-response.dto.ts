@@ -36,5 +36,14 @@ export class CuentaResponseDto {
 
   @ApiProperty({ example: 1500.00, description: 'Saldo actual calculado', required: false })
   saldo_actual?: number;
+
+  @ApiProperty({ example: 5000000, description: 'Cupo (tarjeta de crédito)', nullable: true })
+  cupo?: number | null;
+
+  @ApiProperty({ example: 25, description: 'Día de corte (tarjeta de crédito)', nullable: true })
+  dia_corte?: number | null;
+
+  @ApiProperty({ example: 10, description: 'Día límite de pago (tarjeta de crédito)', nullable: true })
+  dia_pago?: number | null;
 }
 

@@ -22,7 +22,7 @@ export class PrestamosService {
 
   async create(usuarioId: number, dto: CreatePrestamoDto) {
     const result = await this.connection.manager.query(
-      `EXEC sp_prestamo_create @UsuarioId=@0,@Nombre=@1,@Tipo=@2,@MontoTotal=@3,@TasaInteres=@4,@FechaInicio=@5,@FechaFin=@6,@CuentaId=@7,@Notas=@8,@RegistrarMovimiento=@9`,
+      `EXEC sp_prestamo_create @UsuarioId=@0,@Nombre=@1,@Tipo=@2,@MontoTotal=@3,@TasaInteres=@4,@FechaInicio=@5,@FechaFin=@6,@CuentaId=@7,@Notas=@8,@RegistrarMovimiento=@9,@MontoMovimiento=@10`,
       [
         usuarioId,
         dto.nombre,
@@ -34,9 +34,51 @@ export class PrestamosService {
         dto.cuentaId ?? null,
         dto.notas ?? null,
         dto.registrarMovimiento ? 1 : 0,
+        // En cuotas, montoTotal incluye intereses: el dinero que entra o
+        // sale al registrarlo es solo lo prestado
+        dto.montoPrestado ?? null,
       ],
     );
-    return this.ensureArray(result)[0];
+    const creado = this.ensureArray(result)[0];
+    return creado ? this.guardarCuotas(usuarioId, creado.id, dto, creado) : creado;
+  }
+
+  /**
+   * Datos del crédito en cuotas (columnas de migration-prestamos-cuotas.sql),
+   * fuera de los SP para no cambiar sus parámetros. Solo toca los campos que
+   * vienen en el DTO; null los borra.
+   */
+  private async guardarCuotas(
+    usuarioId: number,
+    id: number,
+    dto: Partial<CreatePrestamoDto>,
+    fila: any,
+  ) {
+    const campos = [
+      ['montoPrestado', 'monto_prestado'],
+      ['tipoTasa', 'tipo_tasa'],
+      ['numeroCuotas', 'numero_cuotas'],
+      ['valorCuota', 'valor_cuota'],
+      ['diaPago', 'dia_pago'],
+      ['fechaPrimeraCuota', 'fecha_primera_cuota'],
+      ['cuotasPrevias', 'cuotas_previas'],
+    ] as const;
+    const sets: string[] = [];
+    const params: any[] = [];
+    for (const [prop, columna] of campos) {
+      // undefined: no vino; null: borrarlo
+      if (dto[prop] === undefined) continue;
+      sets.push(`${columna} = @${params.length}`);
+      params.push(dto[prop] ?? null);
+    }
+    if (sets.length === 0) return fila;
+    params.push(id, usuarioId);
+    await this.connection.manager.query(
+      `UPDATE dbo.prestamos SET ${sets.join(', ')}
+       WHERE id = @${params.length - 2} AND usuario_id = @${params.length - 1}`,
+      params,
+    );
+    return this.findOne(usuarioId, id);
   }
 
   async findAll(usuarioId: number, activosSolo?: boolean, filtro?: PrestamoFiltro) {
@@ -78,7 +120,8 @@ export class PrestamosService {
         dto.activa !== undefined ? (dto.activa ? 1 : 0) : null,
       ],
     );
-    return this.ensureArray(result)[0];
+    const fila = this.ensureArray(result)[0];
+    return fila ? this.guardarCuotas(usuarioId, id, dto, fila) : fila;
   }
 
   async toggle(usuarioId: number, id: number, activa: boolean) {

@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsOptional, IsEnum, IsNumber, Min, Max } from 'class-validator';
+import { IsNotEmpty, IsString, IsOptional, IsEnum, IsNumber, IsInt, Min, Max } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { IsMonedaValid } from '../../common/validators/is-moneda-valid.validator';
 import { MonedasConstants } from '../../common/constants/monedas.constants';
@@ -71,5 +71,27 @@ export class CreateCuentaDto {
   @IsOptional()
   @IsString({ message: 'La descripción debe ser un texto' })
   descripcion?: string;
+
+  // ── Tarjeta de crédito (las demás cuentas no los usan) ──
+
+  @ApiProperty({ example: 5000000, description: 'Cupo de la tarjeta de crédito', required: false })
+  @IsOptional()
+  @IsNumber({}, { message: 'El cupo debe ser un número' })
+  @Min(0, { message: 'El cupo no puede ser negativo' })
+  cupo?: number | null;
+
+  @ApiProperty({ example: 25, description: 'Día de corte (1-31)', required: false })
+  @IsOptional()
+  @IsInt({ message: 'El día de corte debe ser un número entero' })
+  @Min(1, { message: 'El día de corte va de 1 a 31' })
+  @Max(31, { message: 'El día de corte va de 1 a 31' })
+  diaCorte?: number | null;
+
+  @ApiProperty({ example: 10, description: 'Día límite de pago (1-31)', required: false })
+  @IsOptional()
+  @IsInt({ message: 'El día de pago debe ser un número entero' })
+  @Min(1, { message: 'El día de pago va de 1 a 31' })
+  @Max(31, { message: 'El día de pago va de 1 a 31' })
+  diaPago?: number | null;
 }
 

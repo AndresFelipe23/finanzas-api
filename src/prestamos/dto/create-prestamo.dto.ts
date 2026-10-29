@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsBoolean, IsNotEmpty, IsNumber, IsOptional, IsString, IsIn } from 'class-validator';
+import { IsBoolean, IsNotEmpty, IsNumber, IsOptional, IsString, IsIn, IsInt, Min, Max } from 'class-validator';
 
 export class CreatePrestamoDto {
   @ApiProperty({ example: 'Préstamo carro', description: 'Nombre del préstamo' })
@@ -51,6 +51,51 @@ export class CreatePrestamoDto {
   @IsOptional()
   @IsBoolean()
   registrarMovimiento?: boolean;
+
+  // ── Crédito en cuotas (opcional). Con cuotas, montoTotal es lo que falta
+  // pagar con intereses (valorCuota × cuotas restantes). null borra el dato.
+
+  @ApiProperty({ example: 10000000, required: false, description: 'Capital prestado' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  montoPrestado?: number | null;
+
+  @ApiProperty({ example: 'EA', enum: ['EA', 'MV'], required: false, description: 'EA: efectiva anual; MV: mes vencido' })
+  @IsOptional()
+  @IsIn(['EA', 'MV'], { message: 'Tipo de tasa inválido' })
+  tipoTasa?: 'EA' | 'MV' | null;
+
+  @ApiProperty({ example: 24, required: false })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(600)
+  numeroCuotas?: number | null;
+
+  @ApiProperty({ example: 520000, required: false })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  valorCuota?: number | null;
+
+  @ApiProperty({ example: 10, required: false, description: 'Día del mes en que vence cada cuota' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(31)
+  diaPago?: number | null;
+
+  @ApiProperty({ example: '2026-11-10', required: false, description: 'Vencimiento de la cuota 1' })
+  @IsOptional()
+  @IsString()
+  fechaPrimeraCuota?: string | null;
+
+  @ApiProperty({ example: 6, required: false, description: 'Cuotas pagadas antes de registrarlo en la app' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  cuotasPrevias?: number | null;
 }
 
 

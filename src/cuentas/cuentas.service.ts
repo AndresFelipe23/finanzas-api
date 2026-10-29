@@ -19,7 +19,8 @@ export class CuentasService {
    */
   async create(usuarioId: number, createCuentaDto: CreateCuentaDto): Promise<CuentaResponseDto> {
     try {
-      const { nombre, tipo, moneda, saldoInicial, color, icono, descripcion } = createCuentaDto;
+      const { nombre, tipo, moneda, saldoInicial, color, icono, descripcion, cupo, diaCorte, diaPago } =
+        createCuentaDto;
 
       // Validar el tipo
       const tipoValido = tipo || 'BANCARIA';
@@ -39,9 +40,9 @@ export class CuentasService {
 
       // Insertar la nueva cuenta
       const insertQuery = `
-        INSERT INTO cuentas (usuario_id, nombre, tipo, moneda, saldo_inicial, color, icono, descripcion, activa, fecha_creacion)
-        OUTPUT INSERTED.id, INSERTED.usuario_id, INSERTED.nombre, INSERTED.tipo, INSERTED.moneda, INSERTED.saldo_inicial, INSERTED.color, INSERTED.icono, INSERTED.descripcion, INSERTED.activa, INSERTED.fecha_creacion
-        VALUES (@0, @1, @2, @3, @4, @5, @6, @7, 1, GETDATE())
+        INSERT INTO cuentas (usuario_id, nombre, tipo, moneda, saldo_inicial, color, icono, descripcion, cupo, dia_corte, dia_pago, activa, fecha_creacion)
+        OUTPUT INSERTED.id, INSERTED.usuario_id, INSERTED.nombre, INSERTED.tipo, INSERTED.moneda, INSERTED.saldo_inicial, INSERTED.color, INSERTED.icono, INSERTED.descripcion, INSERTED.cupo, INSERTED.dia_corte, INSERTED.dia_pago, INSERTED.activa, INSERTED.fecha_creacion
+        VALUES (@0, @1, @2, @3, @4, @5, @6, @7, @8, @9, @10, 1, GETDATE())
       `;
 
       const result = await this.connection.manager.query(insertQuery, [
@@ -53,6 +54,9 @@ export class CuentasService {
         color || null,
         icono || null,
         descripcion || null,
+        cupo ?? null,
+        diaCorte ?? null,
+        diaPago ?? null,
       ]);
 
       return this.mapToResponseDto(result[0]);
@@ -89,6 +93,9 @@ export class CuentasService {
           c.color,
           c.icono,
           c.descripcion,
+          c.cupo,
+          c.dia_corte,
+          c.dia_pago,
           c.activa,
           c.fecha_creacion,
           c.saldo_inicial + ISNULL(
@@ -106,7 +113,7 @@ export class CuentasService {
         WHERE c.usuario_id = @0 
           AND c.activa = 1
         GROUP BY c.id, c.usuario_id, c.nombre, c.tipo, c.moneda, c.saldo_inicial,
-                 c.color, c.icono, c.descripcion, c.activa, c.fecha_creacion
+                 c.color, c.icono, c.descripcion, c.cupo, c.dia_corte, c.dia_pago, c.activa, c.fecha_creacion
         ORDER BY c.nombre
       `;
 
@@ -141,6 +148,9 @@ export class CuentasService {
           c.color,
           c.icono,
           c.descripcion,
+          c.cupo,
+          c.dia_corte,
+          c.dia_pago,
           c.activa,
           c.fecha_creacion,
           c.saldo_inicial + ISNULL(
@@ -159,7 +169,7 @@ export class CuentasService {
           AND c.usuario_id = @0
           AND c.activa = 1
         GROUP BY c.id, c.usuario_id, c.nombre, c.tipo, c.moneda, c.saldo_inicial,
-                 c.color, c.icono, c.descripcion, c.activa, c.fecha_creacion
+                 c.color, c.icono, c.descripcion, c.cupo, c.dia_corte, c.dia_pago, c.activa, c.fecha_creacion
       `;
 
       const result = await this.connection.manager.query(query, [usuarioId, cuentaId]);
@@ -237,6 +247,19 @@ export class CuentasService {
         paramIndex++;
       }
 
+      // Datos de tarjeta de crédito; null los borra
+      for (const [campo, columna] of [
+        ['cupo', 'cupo'],
+        ['diaCorte', 'dia_corte'],
+        ['diaPago', 'dia_pago'],
+      ] as const) {
+        if (updateCuentaDto[campo] !== undefined) {
+          updateFields.push(`${columna} = @${paramIndex}`);
+          params.push(updateCuentaDto[campo]);
+          paramIndex++;
+        }
+      }
+
       if (updateCuentaDto.activa !== undefined) {
         updateFields.push(`activa = @${paramIndex}`);
         params.push(updateCuentaDto.activa ? 1 : 0);
@@ -252,7 +275,7 @@ export class CuentasService {
       const updateQuery = `
         UPDATE cuentas
         SET ${updateFields.join(', ')}
-        OUTPUT INSERTED.id, INSERTED.usuario_id, INSERTED.nombre, INSERTED.tipo, INSERTED.moneda, INSERTED.saldo_inicial, INSERTED.color, INSERTED.icono, INSERTED.descripcion, INSERTED.activa, INSERTED.fecha_creacion
+        OUTPUT INSERTED.id, INSERTED.usuario_id, INSERTED.nombre, INSERTED.tipo, INSERTED.moneda, INSERTED.saldo_inicial, INSERTED.color, INSERTED.icono, INSERTED.descripcion, INSERTED.cupo, INSERTED.dia_corte, INSERTED.dia_pago, INSERTED.activa, INSERTED.fecha_creacion
         WHERE id = @${paramIndex}
       `;
 
@@ -335,6 +358,9 @@ export class CuentasService {
           c.color,
           c.icono,
           c.descripcion,
+          c.cupo,
+          c.dia_corte,
+          c.dia_pago,
           c.activa,
           c.fecha_creacion,
           c.saldo_inicial + ISNULL(
@@ -353,7 +379,7 @@ export class CuentasService {
           AND c.tipo = @1
           AND c.activa = 1
         GROUP BY c.id, c.usuario_id, c.nombre, c.tipo, c.moneda, c.saldo_inicial,
-                 c.color, c.icono, c.descripcion, c.activa, c.fecha_creacion
+                 c.color, c.icono, c.descripcion, c.cupo, c.dia_corte, c.dia_pago, c.activa, c.fecha_creacion
         ORDER BY c.nombre
       `;
 
@@ -437,6 +463,9 @@ export class CuentasService {
       color: cuenta.color,
       icono: cuenta.icono,
       descripcion: cuenta.descripcion,
+      cupo: cuenta.cupo != null ? parseFloat(cuenta.cupo) : null,
+      dia_corte: cuenta.dia_corte != null ? parseInt(cuenta.dia_corte) : null,
+      dia_pago: cuenta.dia_pago != null ? parseInt(cuenta.dia_pago) : null,
       activa: Boolean(cuenta.activa),
       fecha_creacion: cuenta.fecha_creacion,
       // != null: un saldo de 0 es válido (antes se perdía y la app mostraba
