@@ -15,10 +15,12 @@ export class PagosRecurrentesScheduler implements OnModuleInit, OnModuleDestroy 
   ) {}
 
   onModuleInit() {
-    // Ejecuta cada 15 minutos
+    // En Vercel (serverless) no hay un proceso permanente que mantenga el
+    // intervalo: ahí lo dispara una vez al día el Cron (cron.controller.ts)
+    if (process.env.VERCEL) return;
+    // Servidor normal: cada 15 minutos y una vez al iniciar
     this.timer = setInterval(() => this.run(), 15 * 60 * 1000);
-    // Primera ejecución al iniciar
-    this.run().catch((e) => this.logger.error(e.message));
+    this.run();
   }
 
   onModuleDestroy() {
@@ -27,49 +29,59 @@ export class PagosRecurrentesScheduler implements OnModuleInit, OnModuleDestroy 
 
   private async run() {
     try {
-      const hoy = new Date();
-      const start = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), 0, 0, 0);
-      const end = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), 23, 59, 59);
+      await this.ejecutarPendientes();
+    } catch (error) {
+      this.logger.error(`Error en scheduler: ${error.message}`);
+    }
+  }
 
-      // Obtener reglas activas
-      const reglas: any[] = await this.connection.manager.query(
-        `SELECT * FROM pagos_recurrentes WHERE activo = 1`,
+  /**
+   * Registra los pagos recurrentes que tocan hoy y aún no tienen su
+   * transacción. Seguro de repetir: los ya registrados hoy se saltan.
+   */
+  async ejecutarPendientes(): Promise<{ revisados: number; ejecutados: number }> {
+    let revisados = 0;
+    let ejecutados = 0;
+    const hoy = new Date();
+    const start = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), 0, 0, 0);
+    const end = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), 23, 59, 59);
+
+    // Obtener reglas activas
+    const reglas: any[] = await this.connection.manager.query(
+      `SELECT * FROM pagos_recurrentes WHERE activo = 1`,
+    );
+
+    for (const r of reglas) {
+      if (!this.estaEnVentana(r, hoy)) continue;
+      if (!this.correspondeHoy(r, hoy)) continue;
+      revisados++;
+
+      // Evitar duplicados: ¿ya existe transacción hoy para esta regla?
+      const dup = await this.connection.manager.query(
+        `SELECT TOP 1 1 FROM transacciones
+         WHERE usuario_id=@0
+           AND ISNULL(cuenta_id, -1) = ISNULL(@1, -1)
+           AND ISNULL(categoria_id, -1) = ISNULL(@2, -1)
+           AND monto = @3
+           AND repetir = 1
+           AND fecha_transaccion >= @4 AND fecha_transaccion <= @5`,
+        [r.usuario_id, r.cuenta_id, r.categoria_id, r.monto, start, end],
       );
+      if (dup && dup.length > 0) continue;
 
-      for (const r of reglas) {
-        if (!this.estaEnVentana(r, hoy)) continue;
-        if (!this.correspondeHoy(r, hoy)) continue;
-
-        // Evitar duplicados: ¿ya existe transacción hoy para esta regla?
-        const dup = await this.connection.manager.query(
-          `SELECT TOP 1 1 FROM transacciones
-           WHERE usuario_id=@0
-             AND ISNULL(cuenta_id, -1) = ISNULL(@1, -1)
-             AND ISNULL(categoria_id, -1) = ISNULL(@2, -1)
-             AND monto = @3
-             AND repetir = 1
-             AND fecha_transaccion >= @4 AND fecha_transaccion <= @5`,
-          [
-            r.usuario_id,
-            r.cuenta_id,
-            r.categoria_id,
-            r.monto,
-            start,
-            end,
-          ],
-        );
-        if (dup && dup.length > 0) continue;
-
-        // Ejecutar ahora usando SP existente
+      // Una regla que falla (p. ej. saldo insuficiente) no frena las demás
+      try {
         await this.connection.manager.query(
           `EXEC sp_pago_recurrente_execute_now @Id=@0,@UsuarioId=@1,@FechaEjecucion=@2`,
           [r.id, r.usuario_id, hoy],
         );
+        ejecutados++;
         this.logger.log(`Pago recurrente ejecutado: id=${r.id} usuario=${r.usuario_id}`);
+      } catch (error) {
+        this.logger.error(`Pago recurrente id=${r.id} no ejecutado: ${error.message}`);
       }
-    } catch (error) {
-      this.logger.error(`Error en scheduler: ${error.message}`);
     }
+    return { revisados, ejecutados };
   }
 
   private estaEnVentana(r: any, fecha: Date): boolean {
