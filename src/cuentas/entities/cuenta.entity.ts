@@ -29,10 +29,18 @@ export class Cuenta {
   @Column({ type: 'nvarchar', length: 500, nullable: true })
   descripcion: string;
 
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  cupo: number;
+
+  @Column({ type: 'tinyint', nullable: true, name: 'dia_corte' })
+  diaCorte: number;
+
+  @Column({ type: 'tinyint', nullable: true, name: 'dia_pago' })
+  diaPago: number;
+
   @Column({ type: 'bit', default: true })
   activa: boolean;
 
   @CreateDateColumn({ type: 'datetime2', name: 'fecha_creacion' })
   fechaCreacion: Date;
 }
-

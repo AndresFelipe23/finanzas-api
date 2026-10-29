@@ -127,6 +127,7 @@ BEGIN
       WHERE t.usuario_id = @UsuarioId
         AND t.activa = 1                -- no contar movimientos eliminados
         AND t.transferencia_id IS NULL  -- pasar plata entre cuentas no es gasto
+        AND NOT EXISTS (SELECT 1 FROM aportes_metas am WHERE am.transaccion_id = t.id) -- los aportes a metas son ahorro, no gasto
         AND t.fecha_transaccion >= @FInicio
         AND t.fecha_transaccion <= DATEADD(SECOND, 86399, @FFin) -- fin del día
     )

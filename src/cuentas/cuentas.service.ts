@@ -422,11 +422,12 @@ export class CuentasService {
             0
           ) AS saldo_actual,
           ISNULL(SUM(CASE 
-            WHEN t.tipo_transaccion_id = @TipoIngresoId THEN t.monto
+            WHEN t.tipo_transaccion_id = @TipoIngresoId AND t.transferencia_id IS NULL THEN t.monto
             ELSE 0
           END), 0) AS total_ingresos,
           ISNULL(SUM(CASE 
-            WHEN t.tipo_transaccion_id = @TipoGastoId THEN t.monto
+            WHEN t.tipo_transaccion_id = @TipoGastoId AND t.transferencia_id IS NULL
+              AND NOT EXISTS (SELECT 1 FROM aportes_metas am WHERE am.transaccion_id = t.id) THEN t.monto
             ELSE 0
           END), 0) AS total_gastos
         FROM cuentas c

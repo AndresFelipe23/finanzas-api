@@ -37,7 +37,7 @@ export class MetasService {
         ],
       );
 
-      return this.mapToResponseDto(result[0]);
+      return this.guardarAporteAuto(usuarioId, result[0].id, createMetaDto, this.mapToResponseDto(result[0]));
     } catch (error) {
       this.logger.error(`Error al crear meta: ${error.message}`);
       throw new Error(`Error al crear meta: ${error.message}`);
@@ -124,7 +124,7 @@ export class MetasService {
         throw new NotFoundException('Meta no encontrada');
       }
 
-      return this.mapToResponseDto(result[0]);
+      return this.guardarAporteAuto(usuarioId, id, updateMetaDto, this.mapToResponseDto(result[0]));
     } catch (error) {
       this.logger.error(`Error al actualizar meta: ${error.message}`);
       
@@ -263,6 +263,43 @@ export class MetasService {
   /**
    * Mapea los datos de la meta a DTO de respuesta
    */
+  /**
+   * Aporte automático (columnas de migration-metas-automaticas.sql), fuera de
+   * los SP para no cambiar sus parámetros. Solo toca lo que viene en el DTO;
+   * null lo desactiva.
+   */
+  private async guardarAporteAuto(
+    usuarioId: number,
+    id: number,
+    dto: Partial<CreateMetaDto>,
+    fila: MetaResponseDto,
+  ): Promise<MetaResponseDto> {
+    const campos = [
+      ['aporteAutoPorcentaje', 'aporte_auto_porcentaje'],
+      ['aporteAutoMinimo', 'aporte_auto_minimo'],
+    ] as const;
+    const sets: string[] = [];
+    const params: any[] = [];
+    for (const [prop, columna] of campos) {
+      // undefined: no vino; null: desactivarlo
+      if (dto[prop] === undefined) continue;
+      sets.push(`${columna} = @${params.length}`);
+      params.push(dto[prop] ?? null);
+    }
+    if (sets.length === 0) return fila;
+    // Sin porcentaje el mínimo no tiene sentido
+    if (dto.aporteAutoPorcentaje === null && dto.aporteAutoMinimo === undefined) {
+      sets.push(`aporte_auto_minimo = NULL`);
+    }
+    params.push(id, usuarioId);
+    await this.connection.manager.query(
+      `UPDATE dbo.metas SET ${sets.join(', ')}
+       WHERE id = @${params.length - 2} AND usuario_id = @${params.length - 1}`,
+      params,
+    );
+    return this.findOne(id, usuarioId);
+  }
+
   private mapToResponseDto(meta: any): MetaResponseDto {
     if (!meta) {
       throw new Error('Meta data is null or undefined');
@@ -295,6 +332,10 @@ export class MetasService {
       activa: meta.activa !== null && meta.activa !== undefined ? Boolean(meta.activa) : true,
       fecha_creacion: meta.fecha_creacion || new Date(),
       fecha_actualizacion: meta.fecha_actualizacion || new Date(),
+      aporte_auto_porcentaje:
+        meta.aporte_auto_porcentaje != null ? Number(meta.aporte_auto_porcentaje) : null,
+      aporte_auto_minimo:
+        meta.aporte_auto_minimo != null ? Number(meta.aporte_auto_minimo) : null,
     };
   }
 }

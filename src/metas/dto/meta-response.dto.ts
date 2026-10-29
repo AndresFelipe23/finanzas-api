@@ -36,5 +36,11 @@ export class MetaResponseDto {
 
   @ApiProperty({ example: '2024-01-20T15:45:00' })
   fecha_actualizacion: Date;
+
+  @ApiProperty({ example: 10, required: false, nullable: true })
+  aporte_auto_porcentaje?: number | null;
+
+  @ApiProperty({ example: 500000, required: false, nullable: true })
+  aporte_auto_minimo?: number | null;
 }
 

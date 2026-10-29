@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, IsNumber, IsDateString, IsOptional, Min } from 'class-validator';
+import { IsNotEmpty, IsString, IsNumber, IsDateString, IsOptional, Min, Max } from 'class-validator';
 
 export class CreateMetaDto {
   @ApiProperty({ example: 'Viaje a Europa', description: 'Nombre de la meta' })
@@ -32,5 +32,20 @@ export class CreateMetaDto {
   @IsOptional()
   @IsString({ message: 'El color debe ser una cadena de texto' })
   color?: string;
+
+  // ── Aporte automático: aparta un % de cada ingreso (null lo desactiva) ──
+
+  @ApiProperty({ example: 10, description: '% de cada ingreso que se aparta para la meta', required: false, nullable: true })
+  @IsOptional()
+  @IsNumber({}, { message: 'El porcentaje debe ser un número' })
+  @Min(0.01, { message: 'El porcentaje debe ser mayor a 0' })
+  @Max(100, { message: 'El porcentaje no puede pasar de 100' })
+  aporteAutoPorcentaje?: number | null;
+
+  @ApiProperty({ example: 500000, description: 'Solo se aparta de ingresos de este valor o más', required: false, nullable: true })
+  @IsOptional()
+  @IsNumber({}, { message: 'El mínimo debe ser un número' })
+  @Min(0, { message: 'El mínimo no puede ser negativo' })
+  aporteAutoMinimo?: number | null;
 }
 

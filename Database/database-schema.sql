@@ -64,6 +64,9 @@ CREATE TABLE cuentas (
     color NVARCHAR(7) NULL,
     icono NVARCHAR(50) NULL,
     descripcion NVARCHAR(500) NULL,
+    cupo DECIMAL(18,2) NULL,
+    dia_corte TINYINT NULL CHECK (dia_corte BETWEEN 1 AND 31),
+    dia_pago TINYINT NULL CHECK (dia_pago BETWEEN 1 AND 31),
     activa BIT DEFAULT 1 NOT NULL,
     fecha_creacion DATETIME2 DEFAULT GETDATE() NOT NULL,
     CONSTRAINT FK_cuentas_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE

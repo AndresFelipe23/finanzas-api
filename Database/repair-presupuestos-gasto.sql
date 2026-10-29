@@ -25,6 +25,8 @@ OUTER APPLY (
   FROM dbo.transacciones t
   WHERE t.usuario_id = p.usuario_id
     AND t.activa = 1
+    AND t.transferencia_id IS NULL
+    AND NOT EXISTS (SELECT 1 FROM dbo.aportes_metas am WHERE am.transaccion_id = t.id)
     AND t.tipo_transaccion_id = (SELECT id FROM dbo.tipos_transaccion WHERE nombre = 'GASTO' AND activo = 1)
     AND t.fecha_transaccion >= p.fecha_inicio
     AND t.fecha_transaccion <= DATEADD(SECOND, 86399, p.fecha_fin)

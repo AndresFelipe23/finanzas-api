@@ -44,6 +44,9 @@ Crea una nueva cuenta para el usuario autenticado.
 - `color` (opcional): Color en formato hexadecimal
 - `icono` (opcional): Icono de la cuenta
 - `descripcion` (opcional): Descripción de la cuenta
+- `cupo` (opcional): Cupo de la tarjeta de crédito
+- `diaCorte` (opcional): Día de corte de la tarjeta (1-31)
+- `diaPago` (opcional): Día límite de pago (1-31)
 
 ### `GET /cuentas`
 Obtiene todas las cuentas activas del usuario con su saldo actual calculado.
@@ -130,11 +133,17 @@ CREATE TABLE cuentas (
     color NVARCHAR(7) NULL,
     icono NVARCHAR(50) NULL,
     descripcion NVARCHAR(500) NULL,
+    cupo DECIMAL(18,2) NULL,
+    dia_corte TINYINT NULL CHECK (dia_corte BETWEEN 1 AND 31),
+    dia_pago TINYINT NULL CHECK (dia_pago BETWEEN 1 AND 31),
     activa BIT DEFAULT 1 NOT NULL,
     fecha_creacion DATETIME2 DEFAULT GETDATE() NOT NULL,
     CONSTRAINT FK_cuentas_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
 );
 ```
+
+For existing databases, run `Database/migration-tarjetas.sql` against the
+application database before deploying code that reads or writes these fields.
 
 ## Cálculo de Saldo Actual
 
@@ -193,4 +202,3 @@ PATCH /api/cuentas/1
 DELETE /api/cuentas/1
 // Solo si no tiene transacciones ni saldo
 ```
-

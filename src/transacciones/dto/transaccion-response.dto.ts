@@ -74,5 +74,12 @@ export class TransaccionResponseDto {
     nullable: true,
   })
   transferencia_id?: number | null;
+
+  @ApiProperty({
+    example: null,
+    description: 'Id de la meta si es un aporte a una meta (ahorro, no cuenta como gasto)',
+    nullable: true,
+  })
+  meta_id?: number | null;
 }
 

@@ -204,6 +204,18 @@ BEGIN
             DEALLOCATE presupuestos_cursor;
         END
 
+        -- Aporte automático a metas si es un INGRESO (sp_metas.sql). El ingreso
+        -- ya quedó registrado: nada de esto puede devolver un error.
+        IF @TipoTransaccionId <> @TipoGastoId
+        BEGIN
+            BEGIN TRY
+                EXEC sp_meta_aportes_automaticos_internal
+                    @UsuarioId = @UsuarioId, @TransaccionId = @NewTransaccionId;
+            END TRY
+            BEGIN CATCH
+            END CATCH
+        END
+
         -- Retornar la transacción creada
         SELECT
             t.id,
@@ -1059,6 +1071,7 @@ BEGIN
         -- Las transferencias (gasto + ingreso entre cuentas propias) no son
         -- ingresos ni gastos reales
         AND t.transferencia_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM aportes_metas am WHERE am.transaccion_id = t.id) -- los aportes a metas son ahorro, no gasto
         AND (@FechaInicio IS NULL OR t.fecha_transaccion >= @FechaInicio)
         AND (@FechaFin IS NULL OR t.fecha_transaccion <= @FechaFin)
     GROUP BY t.categoria_id, c.nombre, c.color, c.icono

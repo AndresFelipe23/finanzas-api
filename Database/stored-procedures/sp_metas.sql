@@ -427,3 +427,132 @@ END;
 GO
 
 
+
+/* ========================= APORTE AUTOMÁTICO =========================
+   Al registrar un INGRESO aparta el % configurado en cada meta activa
+   (metas.aporte_auto_porcentaje, ver migration-metas-automaticas.sql), como
+   un aporte con cuenta: genera un movimiento "Aporte automático a meta: ..." en la
+   cuenta que recibió el ingreso, igual que sp_meta_aporte_create.
+
+   Lo llama sp_transaccion_create (app, registro automático de compras y
+   pagos recurrentes). Es interno: no devuelve resultados y su llamada va
+   dentro de TRY/CATCH, así un fallo aquí nunca tumba el ingreso.
+   Reglas: solo ingresos con cuenta; metas sin completar y con el ingreso
+   >= aporte_auto_minimo; la más próxima a vencer primero; nunca se aparta más
+   de lo que falta para la meta ni más de lo recibido. */
+CREATE OR ALTER PROCEDURE sp_meta_aportes_automaticos_internal
+  @UsuarioId     BIGINT,
+  @TransaccionId BIGINT
+AS
+BEGIN
+  SET NOCOUNT ON;
+
+  DECLARE @CuentaId BIGINT, @Monto DECIMAL(18,2), @Moneda NVARCHAR(10),
+          @Fecha DATETIME2(0), @CategoriaIngreso BIGINT;
+
+  SELECT @CuentaId = t.cuenta_id, @Monto = t.monto, @Moneda = t.moneda,
+         @Fecha = CAST(t.fecha_transaccion AS DATETIME2(0)),
+         @CategoriaIngreso = t.categoria_id
+  FROM dbo.transacciones t
+  JOIN dbo.tipos_transaccion tt ON tt.id = t.tipo_transaccion_id
+  WHERE t.id = @TransaccionId AND t.usuario_id = @UsuarioId
+    AND t.activa = 1 AND tt.nombre = 'INGRESO';
+
+  -- No es un ingreso, o no tiene cuenta de donde apartar
+  IF @Monto IS NULL OR @CuentaId IS NULL RETURN;
+
+  DECLARE @CategoriaAhorro BIGINT, @TipoGastoId BIGINT;
+  SELECT @CategoriaAhorro = id FROM dbo.categorias
+  WHERE usuario_id IS NULL AND nombre = 'Ahorro / Metas';
+  SELECT @TipoGastoId = id FROM dbo.tipos_transaccion WHERE nombre = 'GASTO' AND activo = 1;
+
+  -- Un ingreso de la propia categoría de ahorro (p. ej. un retiro) no se
+  -- vuelve a apartar
+  IF @TipoGastoId IS NULL
+     OR (@CategoriaIngreso IS NOT NULL AND @CategoriaIngreso = @CategoriaAhorro)
+    RETURN;
+
+  DECLARE @Propia BIT = CASE WHEN @@TRANCOUNT = 0 THEN 1 ELSE 0 END;
+  DECLARE @Ahora DATETIME2(0) = CAST(DATEADD(HOUR, -5, GETUTCDATE()) AS DATETIME2(0));
+  DECLARE @Restante DECIMAL(18,2) = @Monto;
+  DECLARE @Hubo BIT = 0;
+  DECLARE @MetaId BIGINT, @Nombre NVARCHAR(200), @Pct DECIMAL(5,2),
+          @Faltante DECIMAL(18,2), @Aporte DECIMAL(18,2), @TransaccionAporte BIGINT;
+
+  DECLARE metas_cursor CURSOR LOCAL FAST_FORWARD FOR
+    SELECT id, nombre, aporte_auto_porcentaje, monto_objetivo - monto_actual
+    FROM dbo.metas
+    WHERE usuario_id = @UsuarioId
+      AND activa = 1
+      AND aporte_auto_porcentaje IS NOT NULL
+      AND monto_actual < monto_objetivo
+      AND @Monto >= ISNULL(aporte_auto_minimo, 0)
+    ORDER BY fecha_objetivo, id;
+
+  OPEN metas_cursor;
+  FETCH NEXT FROM metas_cursor INTO @MetaId, @Nombre, @Pct, @Faltante;
+
+  WHILE @@FETCH_STATUS = 0
+  BEGIN
+    SET @Aporte = ROUND(@Monto * @Pct / 100, 2);
+    IF @Aporte > @Faltante SET @Aporte = @Faltante;
+    IF @Aporte > @Restante SET @Aporte = @Restante;
+
+    IF @Aporte > 0
+    BEGIN
+      BEGIN TRY
+        -- Sin transacción abierta se crea una; con una abierta, un punto de
+        -- guardado para deshacer solo este aporte
+        IF @Propia = 1
+          BEGIN TRAN;
+        ELSE
+          SAVE TRAN aporte_auto;
+
+        INSERT INTO dbo.transacciones (
+          usuario_id, cuenta_id, tipo_transaccion_id, categoria_id, metodo_pago_id,
+          monto, moneda, titulo, descripcion, fecha_transaccion,
+          archivo_adjunto, notas, repetir, activa, fecha_creacion
+        )
+        VALUES (
+          @UsuarioId, @CuentaId, @TipoGastoId, @CategoriaAhorro, NULL,
+          @Aporte, COALESCE(@Moneda, 'COP'),
+          'Aporte automático a meta: ' + @Nombre, NULL, @Fecha,
+          NULL, 'Registrado automáticamente · ' + CAST(@Pct AS NVARCHAR(10)) + '% de un ingreso',
+          0, 1, @Ahora
+        );
+        SET @TransaccionAporte = SCOPE_IDENTITY();
+
+        INSERT INTO dbo.aportes_metas (meta_id, cuenta_id, monto_aporte, fecha_aporte, notas, transaccion_id)
+        VALUES (@MetaId, @CuentaId, @Aporte, @Fecha, 'Aporte automático', @TransaccionAporte);
+
+        UPDATE dbo.metas
+          SET monto_actual = monto_actual + @Aporte, fecha_actualizacion = @Ahora
+        WHERE id = @MetaId AND usuario_id = @UsuarioId;
+
+        IF @Propia = 1 COMMIT TRAN;
+
+        SET @Restante = @Restante - @Aporte;
+        SET @Hubo = 1;
+      END TRY
+      BEGIN CATCH
+        -- Una meta que falle no frena las demás ni el ingreso
+        IF @Propia = 1
+        BEGIN
+          IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+        END
+        ELSE IF XACT_STATE() = 1
+          ROLLBACK TRAN aporte_auto;
+      END CATCH
+    END
+
+    FETCH NEXT FROM metas_cursor INTO @MetaId, @Nombre, @Pct, @Faltante;
+  END
+
+  CLOSE metas_cursor;
+  DEALLOCATE metas_cursor;
+
+  -- Los aportes son gastos: los presupuestos vigentes se recalculan
+  IF @Hubo = 1
+    EXEC sp_meta_recalcular_presupuestos @UsuarioId = @UsuarioId, @Fecha = @Ahora;
+END;
+GO

@@ -137,7 +137,7 @@ export class TransaccionesService {
         ]
       );
 
-      return this.conTransferencias(usuarioId, result.map(item => this.mapToResponseDto(item)));
+      return this.conMarcas(usuarioId, result.map(item => this.mapToResponseDto(item)));
     } catch (error) {
       this.logger.error(`Error al obtener transacciones: ${error.message}`);
       throw new Error(`Error al obtener transacciones: ${error.message}`);
@@ -160,7 +160,7 @@ export class TransaccionesService {
         throw new NotFoundException('Transacción no encontrada');
       }
 
-      const [conMarca] = await this.conTransferencias(usuarioId, [this.mapToResponseDto(result[0])]);
+      const [conMarca] = await this.conMarcas(usuarioId, [this.mapToResponseDto(result[0])]);
       return conMarca;
     } catch (error) {
       this.logger.error(`Error al obtener transacción: ${error.message}`);
@@ -195,6 +195,11 @@ export class TransaccionesService {
 
       // Editar una sola fila descuadraría la pareja (salida y entrada).
       // Restaurar o desactivar sí se permite: se aplica a las dos.
+      if ((await this.aporteDe(transaccionId, usuarioId)) != null) {
+        throw new BadRequestException(
+          'Los aportes a metas no se editan: elimínalo y vuelve a abonar',
+        );
+      }
       const pareja = await this.parejaDe(transaccionId, usuarioId);
       const soloActiva =
         Object.keys(updateTransaccionDto).every((k) => k === 'activa') &&
@@ -376,6 +381,11 @@ export class TransaccionesService {
         throw new NotFoundException('Transacción no encontrada');
       }
 
+      // Un aporte a meta se revierte completo (meta y cuenta)
+      if (await this.revertirAporte(transaccionId, usuarioId)) {
+        return { message: 'Aporte eliminado: la meta y la cuenta volvieron a como estaban' };
+      }
+
       // Una transferencia se borra completa: la salida y la entrada
       const pareja = await this.parejaDe(transaccionId, usuarioId);
       for (const id of pareja != null ? [transaccionId, pareja] : [transaccionId]) {
@@ -412,6 +422,11 @@ export class TransaccionesService {
       
       if (!exists || exists.length === 0) {
         throw new NotFoundException('Transacción no encontrada');
+      }
+
+      // Un aporte a meta se revierte completo (meta y cuenta)
+      if (await this.revertirAporte(transaccionId, usuarioId)) {
+        return { message: 'Aporte eliminado: la meta y la cuenta volvieron a como estaban' };
       }
 
       // Una transferencia se borra completa: la salida y la entrada
@@ -461,7 +476,7 @@ export class TransaccionesService {
         ]
       );
 
-      return this.conTransferencias(usuarioId, result.map(item => this.mapToResponseDto(item)));
+      return this.conMarcas(usuarioId, result.map(item => this.mapToResponseDto(item)));
     } catch (error) {
       this.logger.error(`Error al obtener transacciones por cuenta: ${error.message}`);
       throw new Error(`Error al obtener transacciones por cuenta: ${error.message}`);
@@ -492,7 +507,7 @@ export class TransaccionesService {
         ]
       );
 
-      return this.conTransferencias(usuarioId, result.map(item => this.mapToResponseDto(item)));
+      return this.conMarcas(usuarioId, result.map(item => this.mapToResponseDto(item)));
     } catch (error) {
       this.logger.error(`Error al obtener transacciones por categoría: ${error.message}`);
       throw new Error(`Error al obtener transacciones por categoría: ${error.message}`);
@@ -595,7 +610,7 @@ export class TransaccionesService {
         );
       }
 
-      return this.conTransferencias(usuarioId, result.map(item => this.mapToResponseDto(item)));
+      return this.conMarcas(usuarioId, result.map(item => this.mapToResponseDto(item)));
     } catch (error) {
       this.logger.error(`Error al crear transferencia: ${error.message}`);
       
@@ -615,7 +630,7 @@ export class TransaccionesService {
    * Agrega transferencia_id (la otra fila de una transferencia) sin tocar
    * los SP de lectura, que listan sus columnas una por una.
    */
-  private async conTransferencias(
+  private async conMarcas(
     usuarioId: number,
     items: TransaccionResponseDto[],
   ): Promise<TransaccionResponseDto[]> {
@@ -628,8 +643,48 @@ export class TransaccionesService {
     const pareja = new Map<number, number>(
       filas.map((f) => [parseInt(f.id), parseInt(f.transferencia_id)]),
     );
-    for (const item of items) item.transferencia_id = pareja.get(item.id) ?? null;
+    // Aportes a metas: la transacción (un gasto) que generó cada aporte
+    const aportes: any[] = await this.connection.manager.query(
+      `SELECT a.transaccion_id, a.meta_id
+       FROM aportes_metas a
+       INNER JOIN metas m ON m.id = a.meta_id
+       WHERE m.usuario_id = @0 AND a.transaccion_id IS NOT NULL`,
+      [usuarioId],
+    );
+    const aporteMeta = new Map<number, number>(
+      aportes.map((a) => [parseInt(a.transaccion_id), parseInt(a.meta_id)]),
+    );
+    for (const item of items) {
+      item.transferencia_id = pareja.get(item.id) ?? null;
+      item.meta_id = aporteMeta.get(item.id) ?? null;
+    }
     return items;
+  }
+
+  /** Id del aporte a meta que generó [transaccionId], si es uno. */
+  private async aporteDe(transaccionId: number, usuarioId: number): Promise<number | null> {
+    const r: any[] = await this.connection.manager.query(
+      `SELECT a.id FROM aportes_metas a
+       INNER JOIN metas m ON m.id = a.meta_id
+       WHERE a.transaccion_id = @0 AND m.usuario_id = @1`,
+      [transaccionId, usuarioId],
+    );
+    return r[0]?.id == null ? null : parseInt(r[0].id);
+  }
+
+  /**
+   * Borrar la transacción de un aporte revierte el aporte entero (la meta
+   * baja y el dinero vuelve a la cuenta); borrarla sola dejaría la meta
+   * contando un dinero que ya no está. Devuelve true si era un aporte.
+   */
+  private async revertirAporte(transaccionId: number, usuarioId: number): Promise<boolean> {
+    const aporteId = await this.aporteDe(transaccionId, usuarioId);
+    if (aporteId == null) return false;
+    await this.connection.manager.query(
+      `EXEC sp_meta_aporte_delete @UsuarioId = @0, @AporteId = @1`,
+      [usuarioId, aporteId],
+    );
+    return true;
   }
 
   /** Id de la otra fila si [transaccionId] es parte de una transferencia. */
