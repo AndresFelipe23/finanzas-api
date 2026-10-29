@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { PagosRecurrentesService } from './pagos-recurrentes.service';
 import { CreatePagoRecurrenteDto } from './dto/create-pago-recurrente.dto';
@@ -57,6 +57,15 @@ export class PagosRecurrentesController {
     @CurrentUserId() usuarioId: number,
   ) {
     return this.service.toggle(usuarioId, parseInt(id), activo === 'true');
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Eliminar pago recurrente' })
+  remove(
+    @Param('id') id: string,
+    @CurrentUserId() usuarioId: number,
+  ) {
+    return this.service.remove(usuarioId, parseInt(id));
   }
 
   @Post(':id/ejecutar')
