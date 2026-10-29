@@ -3,6 +3,7 @@ import { InjectConnection } from '@nestjs/typeorm';
 import { Connection } from 'typeorm';
 import { CreatePagoRecurrenteDto } from './dto/create-pago-recurrente.dto';
 import { UpdatePagoRecurrenteDto } from './dto/update-pago-recurrente.dto';
+import { ahoraColombia } from '../common/utils/fecha-colombia';
 
 @Injectable()
 export class PagosRecurrentesService {
@@ -95,11 +96,13 @@ export class PagosRecurrentesService {
   }
 
   async executeNow(usuarioId: number, id: number, fecha?: string | Date) {
+    // Sin fecha: ahora en Colombia (new Date() en un servidor UTC registraba
+    // con fecha del día siguiente desde las 7 p. m.)
     const fechaEjecucion = fecha
       ? typeof fecha === 'string'
         ? new Date(fecha)
         : fecha
-      : new Date();
+      : ahoraColombia();
     const result = await this.connection.manager.query(
       `EXEC sp_pago_recurrente_execute_now @Id=@0,@UsuarioId=@1,@FechaEjecucion=@2`,
       [id, usuarioId, fechaEjecucion],

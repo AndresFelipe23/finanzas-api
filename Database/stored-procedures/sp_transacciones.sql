@@ -16,7 +16,10 @@ CREATE OR ALTER PROCEDURE sp_transaccion_create
     @FechaTransaccion DATETIME2(7) = NULL,
     @ArchivoAdjunto NVARCHAR(500) = NULL,
     @Notas NVARCHAR(1000) = NULL,
-    @Repetir BIT = 0
+    @Repetir BIT = 0,
+    -- 1: @FechaTransaccion trae la fecha y hora local del usuario (cualquier
+    -- país) y se guarda tal cual; 0: solo vale la fecha y la hora es la de Colombia
+    @UsarHora BIT = 0
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -73,7 +76,7 @@ BEGIN
 
         IF @FechaTransaccion IS NULL
             SET @FechaTransaccion = @FechaHoraLocal
-        ELSE
+        ELSE IF @UsarHora = 0
         BEGIN
             -- Combinar la fecha proporcionada con la hora actual del sistema (en hora local)
             DECLARE @HoraActual TIME = CAST(@FechaHoraLocal AS TIME);
@@ -594,7 +597,10 @@ CREATE OR ALTER PROCEDURE sp_transaccion_create_transfer
     @Titulo NVARCHAR(150) = NULL,
     @Descripcion NVARCHAR(500) = NULL,
     @FechaTransaccion DATETIME2(7) = NULL,
-    @Notas NVARCHAR(1000) = NULL
+    @Notas NVARCHAR(1000) = NULL,
+    -- 1: @FechaTransaccion trae la fecha y hora local del usuario y se guarda
+    -- tal cual; 0: solo vale la fecha y la hora es la de Colombia
+    @UsarHora BIT = 0
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -659,7 +665,7 @@ BEGIN
 
         IF @FechaTransaccion IS NULL
             SET @FechaTransaccion = @FechaHoraLocal2
-        ELSE
+        ELSE IF @UsarHora = 0
         BEGIN
             -- Combinar la fecha proporcionada con la hora actual del sistema (en hora local)
             DECLARE @HoraActual2 TIME = CAST(@FechaHoraLocal2 AS TIME);

@@ -179,15 +179,27 @@ BEGIN
         RETURN;
     END
 
-    IF @FechaEjecucion IS NULL SET @FechaEjecucion = CAST(GETDATE() AS DATETIME2(0));
-
-    IF @TipoTransaccionId IS NULL
-    BEGIN
-        SELECT @TipoTransaccionId = id FROM tipos_transaccion WHERE nombre='GASTO' AND activo=1;
-    END
+    -- Sin fecha: ahora en Colombia (GETDATE() es la hora del servidor SQL,
+    -- de zona desconocida). Con fecha: la que envía la app (hora del teléfono
+    -- del usuario) o el Cron, y se guarda tal cual (@UsarHora=1 abajo)
+    IF @FechaEjecucion IS NULL
+        SET @FechaEjecucion = CAST(DATEADD(HOUR, -5, GETUTCDATE()) AS DATETIME2(0));
 
     DECLARE @CuentaId BIGINT, @CategoriaId BIGINT, @MetodoPagoId BIGINT, @Monto DECIMAL(18,2), @Descripcion NVARCHAR(500);
     SELECT @CuentaId=cuenta_id, @CategoriaId=categoria_id, @MetodoPagoId=metodo_pago_id, @Monto=monto, @Descripcion=descripcion FROM @pr;
+
+    -- Tipo según la categoría: una de ingreso (p. ej. Salario) registra un
+    -- INGRESO; las demás, GASTO. Antes todo se registraba como GASTO.
+    IF @TipoTransaccionId IS NULL
+    BEGIN
+        DECLARE @TipoNombre NVARCHAR(20) =
+            CASE WHEN EXISTS (SELECT 1 FROM categorias WHERE id = @CategoriaId AND tipo = 'INGRESO')
+                 THEN 'INGRESO' ELSE 'GASTO' END;
+        SELECT @TipoTransaccionId = id FROM tipos_transaccion WHERE nombre=@TipoNombre AND activo=1;
+    END
+
+    -- Moneda de la cuenta (antes siempre 'COP')
+    SELECT @Moneda = ISNULL(moneda, @Moneda) FROM cuentas WHERE id = @CuentaId;
 
     -- Crear transacción usando SP existente
     EXEC sp_transaccion_create
@@ -203,7 +215,8 @@ BEGIN
         @FechaTransaccion=@FechaEjecucion,
         @ArchivoAdjunto=NULL,
         @Notas=NULL,
-        @Repetir=1; -- marcar como transacción recurrente
+        @Repetir=1, -- marcar como transacción recurrente
+        @UsarHora=1;
 END;
 GO
 

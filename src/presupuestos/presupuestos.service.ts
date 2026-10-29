@@ -3,6 +3,7 @@ import { InjectConnection } from '@nestjs/typeorm';
 import { Connection } from 'typeorm';
 import { CreatePresupuestoDto } from './dto/create-presupuesto.dto';
 import { UpdatePresupuestoDto } from './dto/update-presupuesto.dto';
+import { ahoraColombia } from '../common/utils/fecha-colombia';
 
 @Injectable()
 export class PresupuestosService {
@@ -105,7 +106,8 @@ export class PresupuestosService {
   async resumen(usuarioId: number, fecha?: string) {
     const res = await this.connection.manager.query(
       `EXEC sp_presupuesto_resumen @UsuarioId=@0,@Fecha=@1`,
-      [usuarioId, fecha ?? null],
+      // Sin fecha, el SP usaría GETDATE() del servidor SQL (zona desconocida)
+      [usuarioId, fecha ?? ahoraColombia()],
     );
     return this.ensureArray(res)[0];
   }

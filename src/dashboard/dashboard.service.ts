@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/typeorm';
 import { Connection } from 'typeorm';
 import { DashboardResponseDto, ResumenMensualDto, GastoCategoriaDto, IngresoCategoriaDto, EvolucionMensualDto, PresupuestoDashboardDto, MetaDashboardDto } from './dto/dashboard-response.dto';
+import { ahoraColombia } from '../common/utils/fecha-colombia';
 
 @Injectable()
 export class DashboardService {
@@ -13,7 +14,8 @@ export class DashboardService {
   ) {}
 
   async getDashboard(usuarioId: number, fecha?: string): Promise<DashboardResponseDto> {
-    const date = fecha ? new Date(fecha + '-01') : new Date();
+    // Sin mes pedido: el mes en curso en Colombia
+    const date = fecha ? new Date(fecha + '-01') : ahoraColombia();
     const year = date.getFullYear();
     const month = date.getMonth() + 1;
 

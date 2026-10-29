@@ -4,8 +4,11 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  // Configurar la zona horaria a America/Bogota (UTC-5)
-  process.env.TZ = 'America/Bogota';
+  // El proceso corre en UTC (como en Vercel): la BD guarda la hora de
+  // Colombia y el driver mssql la lee en los campos UTC de cada Date, así que
+  // los getters locales deben ser UTC. "Ahora en Colombia" se pide con
+  // ahoraColombia() (common/utils/fecha-colombia.ts), nunca con new Date().
+  process.env.TZ = 'UTC';
 
   const app = await NestFactory.create(AppModule);
 

@@ -16,6 +16,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { MailService } from './mail.service';
+import { ahoraColombia } from '../common/utils/fecha-colombia';
 
 const RESET_TTL_MS = 60 * 60 * 1000; // 1 hora
 
@@ -45,7 +46,8 @@ export class AuthService {
 
       const saltRounds = parseInt(this.configService.get<string>('BCRYPT_ROUNDS') || '10');
       const passwordHash = await bcrypt.hash(registerDto.password, saltRounds);
-      const now = new Date();
+      // Fechas de la cuenta en hora de Colombia, como el resto de la BD
+      const now = ahoraColombia();
 
       const insertQuery = `
         INSERT INTO usuarios (nombre, email, password_hash, telefono, fecha_nacimiento, moneda_predeterminada, activo, fecha_creacion, fecha_actualizacion)

@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/typeorm';
 import { Connection } from 'typeorm';
+import { ahoraColombia } from '../common/utils/fecha-colombia';
 
 type Frecuencia = 'DIARIO' | 'SEMANAL' | 'MENSUAL' | 'BIMESTRAL' | 'TRIMESTRAL' | 'SEMESTRAL' | 'ANUAL';
 
@@ -42,7 +43,9 @@ export class PagosRecurrentesScheduler implements OnModuleInit, OnModuleDestroy 
   async ejecutarPendientes(): Promise<{ revisados: number; ejecutados: number }> {
     let revisados = 0;
     let ejecutados = 0;
-    const hoy = new Date();
+    // Fecha de Colombia (el proceso corre en UTC: ver fecha-colombia.ts); así
+    // un "Run" manual de noche no registra los pagos de mañana
+    const hoy = ahoraColombia();
     const start = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), 0, 0, 0);
     const end = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), 23, 59, 59);
 

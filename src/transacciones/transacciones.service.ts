@@ -4,6 +4,7 @@ import { Connection } from 'typeorm';
 import { CreateTransaccionDto } from './dto/create-transaccion.dto';
 import { UpdateTransaccionDto } from './dto/update-transaccion.dto';
 import { TransaccionResponseDto } from './dto/transaccion-response.dto';
+import { ahoraColombia, fechaDelCliente } from '../common/utils/fecha-colombia';
 
 @Injectable()
 export class TransaccionesService {
@@ -39,29 +40,9 @@ export class TransaccionesService {
         throw new BadRequestException('El monto debe ser mayor que cero');
       }
 
-      // Fecha objetivo en calendario Colombia (UTC-5), como 'YYYY-MM-DD'.
-      // Se pasa como STRING (no como Date) para que el driver no la desplace de
-      // día al convertir a UTC. El SP le añade la hora local actual.
-      const COL_OFFSET_MS = 5 * 60 * 60 * 1000;
-      const entrada = typeof fechaTransaccion === 'string' ? fechaTransaccion.trim() : '';
-      // Fecha/hora local SIN zona (p. ej. '2026-07-25' o '2026-07-25T12:00:00'):
-      // su parte de fecha ya es la que el usuario quiere.
-      const sinZona = entrada.match(
-        /^(\d{4}-\d{2}-\d{2})(?:[T\s]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?)?$/,
-      );
-
-      let fechaColombia: string;
-      if (sinZona) {
-        fechaColombia = sinZona[1];
-      } else if (entrada) {
-        // Instante absoluto (con Z u offset): convertir a hora Colombia.
-        const inst = new Date(entrada);
-        const base = isNaN(inst.getTime()) ? new Date() : inst;
-        fechaColombia = new Date(base.getTime() - COL_OFFSET_MS).toISOString().slice(0, 10);
-      } else {
-        // Sin fecha: hoy en Colombia.
-        fechaColombia = new Date(Date.now() - COL_OFFSET_MS).toISOString().slice(0, 10);
-      }
+      // Fecha y hora del teléfono del usuario si la envía (cualquier país);
+      // si no, el SP usa la hora de Colombia
+      const fecha = fechaDelCliente(fechaTransaccion as unknown as string);
 
       // Preparar parámetros
       const params = [
@@ -74,10 +55,11 @@ export class TransaccionesService {
         moneda || 'COP',
         titulo !== undefined && titulo !== null && titulo !== '' ? titulo : null,
         descripcion !== undefined && descripcion !== null && descripcion !== '' ? descripcion : null,
-        fechaColombia,
+        fecha.valor,
         archivoAdjunto !== undefined && archivoAdjunto !== null && archivoAdjunto !== '' ? archivoAdjunto : null,
         notas !== undefined && notas !== null && notas !== '' ? notas : null,
         repetir ? 1 : 0,
+        fecha.usarHora ? 1 : 0,
       ];
 
       this.logger.debug(`Creando transacción con parámetros: ${JSON.stringify(params)}`);
@@ -97,7 +79,8 @@ export class TransaccionesService {
           @FechaTransaccion = @9,
           @ArchivoAdjunto = @10,
           @Notas = @11,
-          @Repetir = @12`,
+          @Repetir = @12,
+          @UsarHora = @13`,
         params
       );
 
@@ -261,6 +244,15 @@ export class TransaccionesService {
         updateFields.push(`@Moneda = NULL`);
       }
 
+      // La nota de la app va en titulo; '' la borra (el SP deja igual lo NULL)
+      if (updateTransaccionDto.titulo !== undefined) {
+        updateFields.push(`@Titulo = @${paramIndex}`);
+        params.push(updateTransaccionDto.titulo ?? '');
+        paramIndex++;
+      } else {
+        updateFields.push(`@Titulo = NULL`);
+      }
+
       if (updateTransaccionDto.descripcion !== undefined) {
         updateFields.push(`@Descripcion = @${paramIndex}`);
         params.push(updateTransaccionDto.descripcion);
@@ -271,7 +263,8 @@ export class TransaccionesService {
 
       if (updateTransaccionDto.fechaTransaccion !== undefined) {
         updateFields.push(`@FechaTransaccion = @${paramIndex}`);
-        // Parsear la fecha enviada (solo fecha, hora será del sistema)
+        // Con hora (la del teléfono del usuario, en su país) se guarda tal
+        // cual; solo fecha: esa fecha con la hora actual de Colombia
         const str = updateTransaccionDto.fechaTransaccion as unknown as string;
         const m = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
         let fechaValida: Date;
@@ -279,9 +272,13 @@ export class TransaccionesService {
           const y = Number(m[1]);
           const mo = Number(m[2]) - 1;
           const d = Number(m[3]);
-          // Usar la fecha del usuario pero con la hora actual del sistema
-          const ahora = new Date();
-          fechaValida = new Date(y, mo, d, ahora.getHours(), ahora.getMinutes(), ahora.getSeconds(), ahora.getMilliseconds());
+          const conHora = fechaDelCliente(str).usarHora;
+          const ahora = ahoraColombia();
+          fechaValida = new Date(
+            conHora
+              ? Date.UTC(y, mo, d, Number(m[4]), Number(m[5]), Number(m[6] ?? 0))
+              : Date.UTC(y, mo, d, ahora.getUTCHours(), ahora.getUTCMinutes(), ahora.getUTCSeconds()),
+          );
         } else {
           fechaValida = new Date(updateTransaccionDto.fechaTransaccion);
         }
@@ -527,28 +524,10 @@ export class TransaccionesService {
         throw new BadRequestException('La cuenta de origen y destino no pueden ser la misma');
       }
 
-      let fechaValida: Date;
-      if (fechaTransaccion) {
-        const str = fechaTransaccion as unknown as string;
-        // Parse local YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss
-        const m = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
-        if (m) {
-          const y = Number(m[1]);
-          const mo = Number(m[2]) - 1;
-          const d = Number(m[3]);
-          const hh = m[4] ? Number(m[4]) : 0;
-          const mm = m[5] ? Number(m[5]) : 0;
-          const ss = m[6] ? Number(m[6]) : 0;
-          fechaValida = new Date(y, mo, d, hh, mm, ss); // Local time
-        } else {
-          fechaValida = new Date(str);
-        }
-        if (isNaN(fechaValida.getTime())) {
-          throw new BadRequestException('La fecha de transacción no es válida');
-        }
-      } else {
-        fechaValida = new Date();
-      }
+      // Igual que al crear: la fecha y hora del teléfono si la envía; sin
+      // fecha, null y el SP usa la de Colombia (antes se enviaba new Date(),
+      // que en un servidor UTC pasaba al día siguiente desde las 7 p. m.)
+      const fecha = fechaDelCliente(fechaTransaccion as unknown as string);
 
       // Crear la transferencia usando el stored procedure
       const result = await this.connection.manager.query(
@@ -561,7 +540,8 @@ export class TransaccionesService {
           @Titulo = @5,
           @Descripcion = @6,
           @FechaTransaccion = @7,
-          @Notas = @8`,
+          @Notas = @8,
+          @UsarHora = @9`,
         [
           usuarioId,
           cuentaOrigenId,
@@ -570,8 +550,9 @@ export class TransaccionesService {
           moneda || 'COP',
           titulo || null,
           descripcion || null,
-          fechaValida,
+          fecha.valor,
           notas || null,
+          fecha.usarHora ? 1 : 0,
         ]
       );
 
