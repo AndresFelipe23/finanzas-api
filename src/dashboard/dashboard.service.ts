@@ -59,6 +59,7 @@ export class DashboardService {
       FROM transacciones t
       WHERE t.usuario_id = @0
         AND t.activa = 1
+        AND t.transferencia_id IS NULL -- las transferencias no son ingresos ni gastos
         AND FORMAT(t.fecha_transaccion, 'yyyy-MM') = @1
     `;
 
@@ -100,6 +101,7 @@ export class DashboardService {
         AND t.usuario_id = @0
         AND t.tipo_transaccion_id = @TipoGastoId
         AND t.activa = 1
+        AND t.transferencia_id IS NULL -- las transferencias no son ingresos ni gastos
         AND FORMAT(t.fecha_transaccion, 'yyyy-MM') = @1
       WHERE (c.usuario_id = @0 OR c.usuario_id IS NULL) AND c.activo = 1
       GROUP BY c.id, c.nombre, c.color, c.icono
@@ -140,6 +142,7 @@ export class DashboardService {
         AND t.usuario_id = @0
         AND t.tipo_transaccion_id = @TipoIngresoId
         AND t.activa = 1
+        AND t.transferencia_id IS NULL -- las transferencias no son ingresos ni gastos
         AND FORMAT(t.fecha_transaccion, 'yyyy-MM') = @1
       WHERE (c.usuario_id = @0 OR c.usuario_id IS NULL) AND c.activo = 1
       GROUP BY c.id, c.nombre, c.color, c.icono
@@ -177,6 +180,7 @@ export class DashboardService {
       FROM transacciones t
       WHERE t.usuario_id = @0
         AND t.activa = 1
+        AND t.transferencia_id IS NULL -- las transferencias no son ingresos ni gastos
         AND t.fecha_transaccion >= DATEADD(MONTH, -(@1 - 1), DATEFROMPARTS(LEFT(@2, 4), RIGHT(@2, 2), 1))
         AND t.fecha_transaccion < DATEADD(MONTH, 1, DATEFROMPARTS(LEFT(@2, 4), RIGHT(@2, 2), 1))
       GROUP BY FORMAT(t.fecha_transaccion, 'yyyy-MM')

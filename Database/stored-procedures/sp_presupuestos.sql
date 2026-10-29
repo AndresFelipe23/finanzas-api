@@ -125,6 +125,8 @@ BEGIN
              t.tipo_transaccion_id AS tipo_id
       FROM dbo.transacciones t
       WHERE t.usuario_id = @UsuarioId
+        AND t.activa = 1                -- no contar movimientos eliminados
+        AND t.transferencia_id IS NULL  -- pasar plata entre cuentas no es gasto
         AND t.fecha_transaccion >= @FInicio
         AND t.fecha_transaccion <= DATEADD(SECOND, 86399, @FFin) -- fin del día
     )

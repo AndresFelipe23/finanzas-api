@@ -1054,8 +1054,11 @@ BEGIN
         SUM(CASE WHEN t.tipo_transaccion_id = @TipoGastoId AND t.categoria_id IS NOT NULL THEN t.monto ELSE 0 END) AS gastos_categoria
     FROM transacciones t
     LEFT JOIN categorias c ON t.categoria_id = c.id
-    WHERE t.usuario_id = @UsuarioId 
+    WHERE t.usuario_id = @UsuarioId
         AND t.activa = 1
+        -- Las transferencias (gasto + ingreso entre cuentas propias) no son
+        -- ingresos ni gastos reales
+        AND t.transferencia_id IS NULL
         AND (@FechaInicio IS NULL OR t.fecha_transaccion >= @FechaInicio)
         AND (@FechaFin IS NULL OR t.fecha_transaccion <= @FechaFin)
     GROUP BY t.categoria_id, c.nombre, c.color, c.icono

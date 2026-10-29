@@ -137,7 +137,7 @@ export class TransaccionesService {
         ]
       );
 
-      return result.map(item => this.mapToResponseDto(item));
+      return this.conTransferencias(usuarioId, result.map(item => this.mapToResponseDto(item)));
     } catch (error) {
       this.logger.error(`Error al obtener transacciones: ${error.message}`);
       throw new Error(`Error al obtener transacciones: ${error.message}`);
@@ -160,7 +160,8 @@ export class TransaccionesService {
         throw new NotFoundException('Transacción no encontrada');
       }
 
-      return this.mapToResponseDto(result[0]);
+      const [conMarca] = await this.conTransferencias(usuarioId, [this.mapToResponseDto(result[0])]);
+      return conMarca;
     } catch (error) {
       this.logger.error(`Error al obtener transacción: ${error.message}`);
       
@@ -190,6 +191,24 @@ export class TransaccionesService {
       
       if (!exists || exists.length === 0) {
         throw new NotFoundException('Transacción no encontrada');
+      }
+
+      // Editar una sola fila descuadraría la pareja (salida y entrada).
+      // Restaurar o desactivar sí se permite: se aplica a las dos.
+      const pareja = await this.parejaDe(transaccionId, usuarioId);
+      const soloActiva =
+        Object.keys(updateTransaccionDto).every((k) => k === 'activa') &&
+        updateTransaccionDto.activa !== undefined;
+      if (pareja != null && !soloActiva) {
+        throw new BadRequestException(
+          'Las transferencias no se editan: elimínala y créala de nuevo',
+        );
+      }
+      if (pareja != null) {
+        await this.connection.manager.query(
+          `UPDATE transacciones SET activa = @0 WHERE id = @1 AND usuario_id = @2`,
+          [updateTransaccionDto.activa ? 1 : 0, pareja, usuarioId],
+        );
       }
 
       const updateFields: string[] = [];
@@ -357,12 +376,16 @@ export class TransaccionesService {
         throw new NotFoundException('Transacción no encontrada');
       }
 
-      await this.connection.manager.query(
-        `EXEC sp_transaccion_delete
-          @Id = @0,
-          @UsuarioId = @1`,
-        [transaccionId, usuarioId]
-      );
+      // Una transferencia se borra completa: la salida y la entrada
+      const pareja = await this.parejaDe(transaccionId, usuarioId);
+      for (const id of pareja != null ? [transaccionId, pareja] : [transaccionId]) {
+        await this.connection.manager.query(
+          `EXEC sp_transaccion_delete
+            @Id = @0,
+            @UsuarioId = @1`,
+          [id, usuarioId]
+        );
+      }
 
       return { message: 'Transacción eliminada exitosamente' };
     } catch (error) {
@@ -391,12 +414,16 @@ export class TransaccionesService {
         throw new NotFoundException('Transacción no encontrada');
       }
 
-      await this.connection.manager.query(
-        `EXEC sp_transaccion_delete_permanently
-          @Id = @0,
-          @UsuarioId = @1`,
-        [transaccionId, usuarioId]
-      );
+      // Una transferencia se borra completa: la salida y la entrada
+      const pareja = await this.parejaDe(transaccionId, usuarioId);
+      for (const id of pareja != null ? [transaccionId, pareja] : [transaccionId]) {
+        await this.connection.manager.query(
+          `EXEC sp_transaccion_delete_permanently
+            @Id = @0,
+            @UsuarioId = @1`,
+          [id, usuarioId]
+        );
+      }
 
       return { message: 'Transacción eliminada permanentemente' };
     } catch (error) {
@@ -434,7 +461,7 @@ export class TransaccionesService {
         ]
       );
 
-      return result.map(item => this.mapToResponseDto(item));
+      return this.conTransferencias(usuarioId, result.map(item => this.mapToResponseDto(item)));
     } catch (error) {
       this.logger.error(`Error al obtener transacciones por cuenta: ${error.message}`);
       throw new Error(`Error al obtener transacciones por cuenta: ${error.message}`);
@@ -465,7 +492,7 @@ export class TransaccionesService {
         ]
       );
 
-      return result.map(item => this.mapToResponseDto(item));
+      return this.conTransferencias(usuarioId, result.map(item => this.mapToResponseDto(item)));
     } catch (error) {
       this.logger.error(`Error al obtener transacciones por categoría: ${error.message}`);
       throw new Error(`Error al obtener transacciones por categoría: ${error.message}`);
@@ -556,7 +583,19 @@ export class TransaccionesService {
         ]
       );
 
-      return result.map(item => this.mapToResponseDto(item));
+      // El SP devuelve las dos filas (salida y entrada): se enlazan para que
+      // no cuenten como gasto ni ingreso y se borren juntas
+      const ids = result.map((r: any) => parseInt(r.id)).filter((id: number) => !isNaN(id));
+      if (ids.length === 2) {
+        await this.connection.manager.query(
+          `UPDATE transacciones
+           SET transferencia_id = CASE WHEN id = @0 THEN @1 ELSE @0 END
+           WHERE id IN (@0, @1) AND usuario_id = @2`,
+          [ids[0], ids[1], usuarioId],
+        );
+      }
+
+      return this.conTransferencias(usuarioId, result.map(item => this.mapToResponseDto(item)));
     } catch (error) {
       this.logger.error(`Error al crear transferencia: ${error.message}`);
       
@@ -572,6 +611,37 @@ export class TransaccionesService {
    * Mapea los datos de la transacción a DTO de respuesta
    * Convierte las fechas a strings en formato local para evitar problemas de zona horaria
    */
+  /**
+   * Agrega transferencia_id (la otra fila de una transferencia) sin tocar
+   * los SP de lectura, que listan sus columnas una por una.
+   */
+  private async conTransferencias(
+    usuarioId: number,
+    items: TransaccionResponseDto[],
+  ): Promise<TransaccionResponseDto[]> {
+    if (items.length === 0) return items;
+    const filas: any[] = await this.connection.manager.query(
+      `SELECT id, transferencia_id FROM transacciones
+       WHERE usuario_id = @0 AND transferencia_id IS NOT NULL`,
+      [usuarioId],
+    );
+    const pareja = new Map<number, number>(
+      filas.map((f) => [parseInt(f.id), parseInt(f.transferencia_id)]),
+    );
+    for (const item of items) item.transferencia_id = pareja.get(item.id) ?? null;
+    return items;
+  }
+
+  /** Id de la otra fila si [transaccionId] es parte de una transferencia. */
+  private async parejaDe(transaccionId: number, usuarioId: number): Promise<number | null> {
+    const r: any[] = await this.connection.manager.query(
+      `SELECT transferencia_id FROM transacciones WHERE id = @0 AND usuario_id = @1`,
+      [transaccionId, usuarioId],
+    );
+    const id = r[0]?.transferencia_id;
+    return id == null ? null : parseInt(id);
+  }
+
   private mapToResponseDto(transaccion: any): TransaccionResponseDto {
     if (!transaccion) {
       throw new Error('Transacción es null o undefined');

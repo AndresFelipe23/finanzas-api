@@ -439,7 +439,10 @@ export class CuentasService {
       descripcion: cuenta.descripcion,
       activa: Boolean(cuenta.activa),
       fecha_creacion: cuenta.fecha_creacion,
-      saldo_actual: cuenta.saldo_actual ? parseFloat(cuenta.saldo_actual) : undefined,
+      // != null: un saldo de 0 es válido (antes se perdía y la app mostraba
+      // el saldo inicial)
+      saldo_actual:
+        cuenta.saldo_actual != null ? parseFloat(cuenta.saldo_actual) : undefined,
     };
   }
 }

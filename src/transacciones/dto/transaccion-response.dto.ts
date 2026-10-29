@@ -66,5 +66,13 @@ export class TransaccionResponseDto {
 
   @ApiProperty({ description: 'Fecha de creación en formato local (YYYY-MM-DDTHH:mm:ss)' })
   fecha_creacion: string;
+
+  @ApiProperty({
+    example: null,
+    description:
+      'Id de la otra fila si es una transferencia (salida y entrada entre cuentas propias)',
+    nullable: true,
+  })
+  transferencia_id?: number | null;
 }
 
