@@ -4,7 +4,7 @@
   Notas:
   - Maneja fechas con DATETIME2(0)
   - Asegura actualizacion de saldo_pendiente al crear/actualizar/eliminar pagos
-  - Usa RAISERROR con captura de ERROR_MESSAGE() en variable
+  - Reenvía errores capturados con THROW para preservar el mensaje original
 */
 
 /* Crear tablas si no existen */
@@ -202,7 +202,7 @@ BEGIN
     IF (@FechaFin IS NOT NULL)
       SET @FechaFin = CAST(@FechaFin AS DATETIME2(0));
 
-    DECLARE @NombrePersona NVARCHAR(200) = COALESCE(NULLIF(LTRIM(RTRIM(@NombreDeudorPrestador)), ''), NULLIF(LTRIM(RTRIM(@Notas)), ''), @Nombre);
+    DECLARE @NombrePersona NVARCHAR(200) = COALESCE(NULLIF(LTRIM(RTRIM(@NombreDeudorPrestador)), ''), @Nombre);
     DECLARE @FechaPrestamo DATETIME2(0) = @FechaInicio;
 
     DECLARE @FechaCreacion DATETIME2(0) = CAST(@FechaHoraLocal AS DATETIME2(0));
@@ -313,8 +313,7 @@ BEGIN
     SELECT * FROM dbo.prestamos WHERE id = @NewId AND usuario_id = @UsuarioId;
   END TRY
   BEGIN CATCH
-    DECLARE @Msg NVARCHAR(4000) = ERROR_MESSAGE();
-    RAISERROR(@Msg, 16, 1);
+    THROW;
   END CATCH
 END;
 GO
@@ -422,8 +421,7 @@ BEGIN
     SELECT * FROM dbo.prestamos WHERE id=@Id AND usuario_id=@UsuarioId;
   END TRY
   BEGIN CATCH
-    DECLARE @Msg NVARCHAR(4000) = ERROR_MESSAGE();
-    RAISERROR(@Msg, 16, 1);
+    THROW;
   END CATCH
 END;
 GO
@@ -449,8 +447,7 @@ BEGIN
     SELECT * FROM dbo.prestamos WHERE id=@Id AND usuario_id=@UsuarioId;
   END TRY
   BEGIN CATCH
-    DECLARE @Msg NVARCHAR(4000) = ERROR_MESSAGE();
-    RAISERROR(@Msg, 16, 1);
+    THROW;
   END CATCH
 END;
 GO
@@ -496,8 +493,7 @@ BEGIN
       EXEC sp_prestamo_recalcular_presupuestos @UsuarioId = @UsuarioId;
   END TRY
   BEGIN CATCH
-    DECLARE @Msg NVARCHAR(4000) = ERROR_MESSAGE();
-    RAISERROR(@Msg, 16, 1);
+    THROW;
   END CATCH
 END;
 GO
@@ -512,8 +508,7 @@ BEGIN
     SELECT * FROM dbo.prestamos WHERE id=@Id AND usuario_id=@UsuarioId;
   END TRY
   BEGIN CATCH
-    DECLARE @Msg NVARCHAR(4000) = ERROR_MESSAGE();
-    RAISERROR(@Msg, 16, 1);
+    THROW;
   END CATCH
 END;
 GO
@@ -592,8 +587,7 @@ BEGIN
     ORDER BY fecha_actualizacion DESC;
   END TRY
   BEGIN CATCH
-    DECLARE @Msg NVARCHAR(4000) = ERROR_MESSAGE();
-    RAISERROR(@Msg, 16, 1);
+    THROW;
   END CATCH
 END;
 GO
@@ -746,8 +740,7 @@ BEGIN
   END TRY
   BEGIN CATCH
     IF @@TRANCOUNT > 0 ROLLBACK TRAN;
-    DECLARE @Msg NVARCHAR(4000) = ERROR_MESSAGE();
-    RAISERROR(@Msg, 16, 1);
+    THROW;
   END CATCH
 END;
 GO
@@ -842,8 +835,7 @@ BEGIN
   END TRY
   BEGIN CATCH
     IF @@TRANCOUNT > 0 ROLLBACK TRAN;
-    DECLARE @Msg NVARCHAR(4000) = ERROR_MESSAGE();
-    RAISERROR(@Msg, 16, 1);
+    THROW;
   END CATCH
 END;
 GO
@@ -885,8 +877,7 @@ BEGIN
   END TRY
   BEGIN CATCH
     IF @@TRANCOUNT > 0 ROLLBACK TRAN;
-    DECLARE @Msg NVARCHAR(4000) = ERROR_MESSAGE();
-    RAISERROR(@Msg, 16, 1);
+    THROW;
   END CATCH
 END;
 GO
@@ -908,10 +899,7 @@ BEGIN
     ORDER BY fecha_pago DESC, id DESC;
   END TRY
   BEGIN CATCH
-    DECLARE @Msg NVARCHAR(4000) = ERROR_MESSAGE();
-    RAISERROR(@Msg, 16, 1);
+    THROW;
   END CATCH
 END;
 GO
-
-

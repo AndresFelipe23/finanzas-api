@@ -56,6 +56,8 @@ export class PrestamosService {
   ) {
     const campos = [
       ['montoPrestado', 'monto_prestado'],
+      ['cargoAdicionalNombre', 'cargo_adicional_nombre'],
+      ['cargoAdicionalTotal', 'cargo_adicional_total'],
       ['tipoTasa', 'tipo_tasa'],
       ['numeroCuotas', 'numero_cuotas'],
       ['valorCuota', 'valor_cuota'],
@@ -187,5 +189,4 @@ export class PrestamosService {
     return this.ensureArray(result);
   }
 }
-
 

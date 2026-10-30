@@ -52,14 +52,29 @@ export class CreatePrestamoDto {
   @IsBoolean()
   registrarMovimiento?: boolean;
 
-  // ── Crédito en cuotas (opcional). Con cuotas, montoTotal es lo que falta
-  // pagar con intereses (valorCuota × cuotas restantes). null borra el dato.
+  // ── Crédito en cuotas (opcional). montoTotal incluye intereses y cargos.
+  // null borra los datos opcionales de cuotas.
 
   @ApiProperty({ example: 10000000, required: false, description: 'Capital prestado' })
   @IsOptional()
   @IsNumber()
   @Min(0)
   montoPrestado?: number | null;
+
+  @ApiProperty({ example: 'Servicio de fianza', required: false })
+  @IsOptional()
+  @IsString()
+  cargoAdicionalNombre?: string | null;
+
+  @ApiProperty({
+    example: 162751.62,
+    required: false,
+    description: 'Valor total del cargo adicional para todo el crédito',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  cargoAdicionalTotal?: number | null;
 
   @ApiProperty({ example: 'EA', enum: ['EA', 'MV'], required: false, description: 'EA: efectiva anual; MV: mes vencido' })
   @IsOptional()
@@ -97,5 +112,3 @@ export class CreatePrestamoDto {
   @Min(0)
   cuotasPrevias?: number | null;
 }
-
-

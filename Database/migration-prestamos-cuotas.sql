@@ -11,10 +11,11 @@
 --   fecha_primera_cuota -> vencimiento de la cuota 1
 --   cuotas_previas      -> cuotas ya pagadas antes de registrarlo en la app
 --
--- Con cuotas, monto_total es lo que falta pagar CON intereses al registrarlo
--- (valor_cuota × cuotas restantes): cada pago baja el saldo por su valor
--- completo y llega a 0 en la última cuota. Los préstamos sin cuotas siguen
--- igual (todas estas columnas en NULL). Se puede ejecutar varias veces.
+-- Con cuotas, valor_cuota guarda la cuota base (capital + interés) y
+-- cargo_adicional_total guarda cargos opcionales distribuidos entre las cuotas.
+-- monto_total es el total pendiente al registrarlo, incluidos los cargos.
+-- Los préstamos sin cuotas siguen igual (columnas de cuotas en NULL).
+-- Se puede ejecutar varias veces.
 -- =====================================================
 
 USE FinanzasApiApp;
@@ -43,4 +44,10 @@ IF COL_LENGTH('dbo.prestamos', 'fecha_primera_cuota') IS NULL
 GO
 IF COL_LENGTH('dbo.prestamos', 'cuotas_previas') IS NULL
   ALTER TABLE dbo.prestamos ADD cuotas_previas INT NULL;
+GO
+IF COL_LENGTH('dbo.prestamos', 'cargo_adicional_nombre') IS NULL
+  ALTER TABLE dbo.prestamos ADD cargo_adicional_nombre NVARCHAR(100) NULL;
+GO
+IF COL_LENGTH('dbo.prestamos', 'cargo_adicional_total') IS NULL
+  ALTER TABLE dbo.prestamos ADD cargo_adicional_total DECIMAL(18,2) NULL;
 GO
