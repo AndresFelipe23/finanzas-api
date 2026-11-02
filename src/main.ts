@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { registrarPaginasLegales } from './legal/legal-pages';
 
 async function bootstrap() {
   // El proceso corre en UTC (como en Vercel): la BD guarda la hora de
@@ -73,6 +74,9 @@ async function bootstrap() {
   app.getHttpAdapter().getInstance().get('/scalar', (req, res) => {
     res.send(scalarHtml);
   });
+
+  // Política de privacidad y términos (públicas, fuera de /api)
+  registrarPaginasLegales(app);
 
   // Redirección de la raíz a Scalar
   app.getHttpAdapter().getInstance().get('/', (req, res) => {
