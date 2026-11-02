@@ -159,7 +159,7 @@ const PRIVACIDAD = pagina(
       información financiera, salvo lo que la ley nos obligue a conservar.</p>
     </section>
 
-    <section>
+    <section id="eliminar-cuenta">
       <h2>7. Tus derechos y cómo eliminar tu cuenta</h2>
       <p>Puedes conocer, actualizar, rectificar y suprimir tus datos, y revocar la
       autorización para tratarlos. Para ejercer cualquiera de estos derechos o para
@@ -276,5 +276,9 @@ export function registrarPaginasLegales(app: INestApplication) {
   }
   for (const ruta of ['/terminos', '/terms-of-service', '/terms']) {
     http.get(ruta, enviar(TERMINOS));
+  }
+  // Para el formulario de eliminación de datos de Google Play
+  for (const ruta of ['/eliminar-cuenta', '/delete-account']) {
+    http.get(ruta, (_req: any, res: any) => res.redirect('/privacidad#eliminar-cuenta'));
   }
 }
