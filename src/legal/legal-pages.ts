@@ -11,7 +11,7 @@ import type { INestApplication } from '@nestjs/common';
  * y la fecha de ACTUALIZADO.
  */
 
-const ACTUALIZADO = '1 de noviembre de 2026';
+const ACTUALIZADO = '18 de noviembre de 2026';
 const CONTACTO = 'afesdev2025@gmail.com';
 
 const pagina = (titulo: string, cuerpo: string) => `<!DOCTYPE html>
@@ -161,11 +161,15 @@ const PRIVACIDAD = pagina(
 
     <section id="eliminar-cuenta">
       <h2>7. Tus derechos y cómo eliminar tu cuenta</h2>
-      <p>Puedes conocer, actualizar, rectificar y suprimir tus datos, y revocar la
-      autorización para tratarlos. Para ejercer cualquiera de estos derechos o para
-      <strong>eliminar tu cuenta y todos tus datos</strong>, escríbenos a
+      <p><strong>Eliminar tu cuenta desde la app:</strong> entra a <strong>Perfil →
+      Eliminar mi cuenta</strong> y confirma con tu contraseña. Se borran de inmediato y
+      para siempre tu cuenta y todos tus datos: cuentas, movimientos, presupuestos,
+      metas, préstamos y pagos recurrentes. No conservamos copias.</p>
+      <p>Si ya no tienes la app o no puedes entrar, escríbenos a
       <a href="mailto:${CONTACTO}?subject=Eliminar%20mi%20cuenta%20de%20Financially">${CONTACTO}</a>
-      desde el correo de tu cuenta. Responderemos en un máximo de 15 días hábiles.</p>
+      desde el correo de tu cuenta y la eliminamos en un máximo de 15 días hábiles.</p>
+      <p>También puedes conocer, actualizar, rectificar y suprimir tus datos, y revocar
+      la autorización para tratarlos, escribiendo al mismo correo.</p>
       <p>También puedes presentar quejas ante la Superintendencia de Industria y Comercio
       (SIC) de Colombia.</p>
     </section>
@@ -249,8 +253,8 @@ const TERMINOS = pagina(
 
     <section>
       <h2>8. Terminación</h2>
-      <p>Puedes dejar de usar la app y pedir la eliminación de tu cuenta cuando quieras,
-      como se explica en la <a href="/privacidad">Política de privacidad</a>. Podemos
+      <p>Puedes dejar de usar la app y eliminar tu cuenta cuando quieras desde Perfil →
+      Eliminar mi cuenta, como se explica en la <a href="/privacidad">Política de privacidad</a>. Podemos
       suspender cuentas que incumplan estos términos.</p>
     </section>
 

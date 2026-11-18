@@ -352,6 +352,51 @@ export class AuthService {
     }
   }
 
+
+  /* ─────────────── Eliminar cuenta ─────────────── */
+
+  /**
+   * Borra la cuenta y TODOS sus datos (Google Play exige poder hacerlo desde la
+   * app). Pide la contraseña para confirmar. Va en una transacción y en orden:
+   * algunas tablas se referencian entre sí sin borrado en cascada (aportes →
+   * transacciones, préstamos → transacciones, pagos NFC → tarjetas), así que
+   * primero se borra lo que apunta y al final el usuario. No se puede deshacer.
+   */
+  async eliminarCuenta(usuarioId: number, password: string): Promise<{ message: string }> {
+    const filas = await this.connection.manager.query(
+      'SELECT id, password_hash FROM usuarios WHERE id = @0',
+      [usuarioId],
+    );
+    const usuario = filas?.[0];
+    if (!usuario) throw new UnauthorizedException('Usuario no encontrado');
+    if (!(await bcrypt.compare(password, usuario.password_hash))) {
+      throw new BadRequestException('La contraseña no es correcta');
+    }
+
+    const borrados = [
+      'DELETE a FROM aportes_metas a JOIN metas m ON m.id = a.meta_id WHERE m.usuario_id = @0',
+      'DELETE p FROM pagos_prestamos p JOIN prestamos pr ON pr.id = p.prestamo_id WHERE pr.usuario_id = @0',
+      'DELETE FROM pagos_nfc WHERE usuario_id = @0',
+      'DELETE FROM tarjetas_nfc WHERE usuario_id = @0',
+      'DELETE FROM dispositivos_nfc WHERE usuario_id = @0',
+      'DELETE FROM prestamos WHERE usuario_id = @0',
+      'DELETE FROM metas WHERE usuario_id = @0',
+      'DELETE FROM presupuestos WHERE usuario_id = @0',
+      'DELETE FROM pagos_recurrentes WHERE usuario_id = @0',
+      'DELETE FROM transacciones WHERE usuario_id = @0',
+      'DELETE FROM cuentas WHERE usuario_id = @0',
+      'DELETE FROM categorias WHERE usuario_id = @0',
+      'DELETE FROM refresh_tokens WHERE usuario_id = @0',
+      'DELETE FROM password_reset_tokens WHERE usuario_id = @0',
+      'DELETE FROM usuarios WHERE id = @0',
+    ];
+    await this.connection.transaction(async (manager) => {
+      for (const sql of borrados) await manager.query(sql, [usuarioId]);
+    });
+    this.logger.log(`Cuenta ${usuarioId} eliminada con todos sus datos`);
+    return { message: 'Tu cuenta y todos tus datos fueron eliminados' };
+  }
+
   private mapUser(usuario: any) {
     return {
       id: parseInt(usuario.id),

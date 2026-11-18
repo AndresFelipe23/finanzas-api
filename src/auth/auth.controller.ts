@@ -8,6 +8,7 @@ import {
   Get,
   Request,
   Patch,
+  Delete,
   Headers,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -20,6 +21,7 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { DeleteAccountDto } from './dto/delete-account.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 
@@ -122,5 +124,18 @@ export class AuthController {
     const usuarioId = req.user?.id;
     if (!usuarioId) throw new UnauthorizedException('Usuario no autenticado');
     return await this.authService.updateProfile(usuarioId, updateProfileDto);
+  }
+
+  @Delete('cuenta')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Eliminar la cuenta y todos sus datos (no se puede deshacer)' })
+  @ApiBearerAuth()
+  @ApiResponse({ status: 200, description: 'Cuenta eliminada' })
+  @ApiResponse({ status: 400, description: 'Contraseña incorrecta' })
+  @HttpCode(HttpStatus.OK)
+  async eliminarCuenta(@Request() req, @Body() dto: DeleteAccountDto) {
+    const usuarioId = req.user?.id;
+    if (!usuarioId) throw new UnauthorizedException('Usuario no autenticado');
+    return await this.authService.eliminarCuenta(usuarioId, dto.password);
   }
 }
